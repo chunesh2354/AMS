@@ -1,0 +1,136 @@
+/* Sections 4-6 of docs/ui-brief.md. The only file allowed to contain colour literals. */
+:root {
+  --font-sans: "Geist Sans", "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-display: 600 28px/34px var(--font-sans);  --track-display: -0.02em;
+  --text-h1: 600 22px/28px var(--font-sans);       --track-h1: -0.015em;
+  --text-h2: 600 17px/24px var(--font-sans);       --track-h2: -0.01em;
+  --text-h3: 600 14px/20px var(--font-sans);
+  --text-body: 400 14px/20px var(--font-sans);
+  --text-body-sm: 400 13px/18px var(--font-sans);
+  --text-label: 500 12px/16px var(--font-sans);    --track-label: 0.04em;
+  --text-caption: 400 12px/16px var(--font-sans);
+  --text-numeric: 500 13px/18px var(--font-mono);
+  --text-kpi: 500 24px/28px var(--font-mono);      --track-kpi: -0.01em;
+  --text-timer: 500 15px/20px var(--font-mono);
+
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+  --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px; --radius-pill: 999px;
+
+  --h-control: 36px; --h-dense: 32px; --h-cta: 40px; --h-chip: 28px;
+  --row-comfortable: 40px; --row-dense: 32px; --row-header: 36px;
+
+  --sidebar: 248px; --sidebar-collapsed: 64px; --topbar: 56px;
+  --sheet-form: 480px; --sheet-detail: 640px; --sheet-footer: 64px;
+  --gutter: 32px; --content-max: 1440px;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1: 150ms; --dur-2: 200ms; --dur-3: 220ms;
+
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+
+  --restricted: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px);
+  --overrun-hatch: repeating-linear-gradient(45deg, var(--danger) 0 2px, var(--danger-soft) 2px 6px);
+  --unavailable-hatch: repeating-linear-gradient(45deg, var(--neutral-soft) 0 4px, transparent 4px 8px);
+
+  /* Glass recipe shadows from section 5.2, tokenised so glass.css stays literal-free. */
+  --shadow-glass: 0 1px 2px rgba(15,23,42,0.04), 0 12px 32px -12px rgba(15,23,42,0.18);
+  --shadow-glass-elevated: 0 24px 64px -16px rgba(15,23,42,0.28);
+}
+
+@media (max-width: 1279px) { :root { --gutter: 24px; } }
+@media (max-width: 1023px) { :root { --gutter: 16px; } }
+
+:root {
+  color-scheme: light;
+  /* LIGHT */
+  --bg-plane: radial-gradient(1200px 800px at 20% -10%, #e8eef7 0%, #f4f6f9 45%, #eef1f5 100%);
+  --bg-plane-accent: radial-gradient(600px 400px at 85% 110%, rgba(47,111,237,0.10), transparent 70%);
+  --glass-1: rgba(255,255,255,0.55);
+  --glass-2: rgba(255,255,255,0.72);
+  --glass-edge-in: rgba(255,255,255,0.65);
+  --glass-edge-out: rgba(15,23,42,0.08);
+  --surface: #ffffff;
+  --surface-muted: #f3f5f8;
+  --surface-raised: #ffffff;
+  --ink-1: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #94a3b8;
+  --line: rgba(15,23,42,0.08);
+  --line-strong: rgba(15,23,42,0.16);
+  --accent: #2f6fed;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(47,111,237,0.12);
+  --accent-text: #1f55c4;
+  --ok: #1f9d63;       --ok-soft: rgba(31,157,99,0.14);      --ok-ink: #0f6339;
+  --warn: #d98a0b;     --warn-soft: rgba(217,138,11,0.14);   --warn-ink: #7f4e00;
+  --danger: #d64545;   --danger-soft: rgba(214,69,69,0.14);  --danger-ink: #a32424;
+  --info: #5b6cff;     --info-soft: rgba(91,108,255,0.14);   --info-ink: #3a47d1;
+  --neutral: #7c8797;  --neutral-soft: rgba(124,135,151,0.14); --neutral-ink: #4d5766;
+  /* END LIGHT */
+}
+
+/* Dark values, repeated verbatim in both selectors as section 5 prescribes. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg-plane: radial-gradient(1200px 800px at 20% -10%, #1b2230 0%, #0f141c 45%, #0b0f15 100%);
+    --bg-plane-accent: radial-gradient(600px 400px at 85% 110%, rgba(107,156,255,0.12), transparent 70%);
+    --glass-1: rgba(24,30,40,0.55);
+    --glass-2: rgba(30,37,48,0.72);
+    --glass-edge-in: rgba(255,255,255,0.08);
+    --glass-edge-out: rgba(0,0,0,0.5);
+    --surface: #141a23;
+    --surface-muted: #1b222c;
+    --surface-raised: #1a212b;
+    --ink-1: #eef2f7;
+    --ink-2: #a7b1c0;
+    --ink-3: #6b7686;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(255,255,255,0.16);
+    --accent: #6b9cff;
+    --accent-ink: #0b0f15;
+    --accent-soft: rgba(107,156,255,0.18);
+    --accent-text: #8fb4ff;
+    --ok: #3fcf8e;       --ok-soft: rgba(63,207,142,0.18);     --ok-ink: #4fd89a;
+    --warn: #f2b03d;     --warn-soft: rgba(242,176,61,0.18);   --warn-ink: #f4bb57;
+    --danger: #ff7070;   --danger-soft: rgba(255,112,112,0.18); --danger-ink: #ff8f8f;
+    --info: #8f9bff;     --info-soft: rgba(143,155,255,0.18);  --info-ink: #aab3ff;
+    --neutral: #8b95a5;  --neutral-soft: rgba(139,149,165,0.18); --neutral-ink: #b4bcc9;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* DARK */
+  --bg-plane: radial-gradient(1200px 800px at 20% -10%, #1b2230 0%, #0f141c 45%, #0b0f15 100%);
+  --bg-plane-accent: radial-gradient(600px 400px at 85% 110%, rgba(107,156,255,0.12), transparent 70%);
+  --glass-1: rgba(24,30,40,0.55);
+  --glass-2: rgba(30,37,48,0.72);
+  --glass-edge-in: rgba(255,255,255,0.08);
+  --glass-edge-out: rgba(0,0,0,0.5);
+  --surface: #141a23;
+  --surface-muted: #1b222c;
+  --surface-raised: #1a212b;
+  --ink-1: #eef2f7;
+  --ink-2: #a7b1c0;
+  --ink-3: #6b7686;
+  --line: rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.16);
+  --accent: #6b9cff;
+  --accent-ink: #0b0f15;
+  --accent-soft: rgba(107,156,255,0.18);
+  --accent-text: #8fb4ff;
+  --ok: #3fcf8e;       --ok-soft: rgba(63,207,142,0.18);     --ok-ink: #4fd89a;
+  --warn: #f2b03d;     --warn-soft: rgba(242,176,61,0.18);   --warn-ink: #f4bb57;
+  --danger: #ff7070;   --danger-soft: rgba(255,112,112,0.18); --danger-ink: #ff8f8f;
+  --info: #8f9bff;     --info-soft: rgba(143,155,255,0.18);  --info-ink: #aab3ff;
+  --neutral: #8b95a5;  --neutral-soft: rgba(139,149,165,0.18); --neutral-ink: #b4bcc9;
+  /* END DARK */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; }
+}
