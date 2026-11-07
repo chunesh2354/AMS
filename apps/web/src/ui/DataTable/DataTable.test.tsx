@@ -40,7 +40,7 @@ describe('DataTable', () => {
   it('edits inline', async () => {
     const onEdit = vi.fn();
     render(<DataTable {...base} columns={[{ ...columns[0], onEdit }]} />);
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: /^Edit Name/ })[0]);
     await userEvent.keyboard('X{Enter}');
     expect(onEdit).toHaveBeenCalledWith(rows[0], 'AshaX');
   });

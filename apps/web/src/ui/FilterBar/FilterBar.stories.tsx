@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { MemoryRouter, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { FilterBar, type FilterDef } from '.';
 
 const meta: Meta<typeof FilterBar> = { title: 'Data display/FilterBar', component: FilterBar };
@@ -17,5 +17,6 @@ function Url() {
 const views = [{ name: 'My projects on hold', params: { pm: 'P02', status: 'hold' } }];
 export const Idle: StoryObj = { render: () => <><FilterBar filters={FILTERS} savedViews={views} /><Url /></> };
 export const Active: StoryObj = {
-  render: () => <MemoryRouter initialEntries={['/?pm=P02&status=active,hold&due=2026-11-01..2026-11-30']}><FilterBar filters={FILTERS} savedViews={views} /><Url /></MemoryRouter>,
+  parameters: { route: '/?pm=P02&status=active,hold&due=2026-11-01..2026-11-30' },
+  render: () => <><FilterBar filters={FILTERS} savedViews={views} /><Url /></>,
 };

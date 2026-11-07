@@ -82,6 +82,7 @@ textarea.field__input { padding: var(--s-2) 0; resize: vertical; min-height: 80p
   display: inline-flex; align-items: center; gap: var(--s-1); height: 24px; padding: 0 var(--s-2);
   border-radius: var(--radius-pill); background: var(--accent-soft); font: var(--text-caption);
 }
+.field--disabled .tag { color: var(--ink-2); }
 .tag button { display: inline-flex; border-radius: var(--radius-pill); }
 
 /* Segmented */

@@ -21,7 +21,9 @@ const preview: Preview = {
     (Story, ctx) => {
       const theme = ctx.globals.theme as string;
       useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
-      return <MemoryRouter><Story /></MemoryRouter>;
+      // Stories set their starting URL with parameters.route; they must not add a second router.
+      const route = ctx.parameters.route as string | undefined;
+      return <MemoryRouter initialEntries={[route ?? '/']}><Story /></MemoryRouter>;
     },
   ],
 };

@@ -60,5 +60,5 @@ svg { display: block; flex: none; }
 @media print {
   body::before { display: none; }
   html { background: white; }
-  .glass, .glass--elevated { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
+  .glass, .glass--elevated { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
 }

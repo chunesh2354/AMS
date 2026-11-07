@@ -72,7 +72,7 @@ function formatValue(type: ColumnType, v: unknown): ReactNode {
 
 function EditCell({ text, label, onCommit }: { text: string; label: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
-  if (draft == null) return <button type="button" className="dt__edit" aria-label={`Edit ${label}`} onClick={(e) => { e.stopPropagation(); setDraft(text); }}>{text}</button>;
+  if (draft == null) return <button type="button" className="dt__edit" aria-label={`Edit ${label} ${text}`} onClick={(e) => { e.stopPropagation(); setDraft(text); }}>{text}</button>;
   return (
     <input
       autoFocus aria-label={label} className="dt__edit-input" value={draft}

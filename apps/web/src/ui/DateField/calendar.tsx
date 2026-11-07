@@ -55,7 +55,7 @@ export function Calendar({ selected, rangeEnd, min, max, holidays = [], today, o
             <button
               key={iso} type="button" data-day={iso} tabIndex={iso === cursor ? 0 : -1}
               disabled={(min && iso < min) || (max && iso > max) || undefined}
-              aria-label={`${formatDate(iso)}${isHoliday ? ', holiday' : ''}`}
+              aria-label={`${formatDate(iso).replace(/^0/, '')}${isHoliday ? ', holiday' : ''}`}
               aria-pressed={isSel}
               className={cx('calendar__day', !inMonth && 'calendar__day--other', isHoliday && 'calendar__day--holiday', iso === today && 'calendar__day--today', inRange && 'calendar__day--range', isSel && 'calendar__day--selected')}
               onClick={() => onSelect(iso)}

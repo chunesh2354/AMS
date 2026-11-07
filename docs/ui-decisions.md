@@ -13,3 +13,8 @@ Choices made where the brief was ambiguous or could not be met as written. The c
 9. **Mock values the brief does not give** (Utilization 78%, Contribution ₹6,40,000, the PRJ-01 entitlement split, phase budgets other than Working drawings) are placeholders that add up to the brief's totals.
 10. **Canvas mock data beyond the brief.** Pipeline opportunities, the Harbour Studio Offices proposal, task names, leave balances and integration modes are invented placeholders. Amounts are kept consistent across screens: ready to bill ₹4,86,000 is ₹80,000 from PRJ-01 plus ₹4,06,000 from PRJ-02, and the only outstanding invoice is INV-DEMO-0007.
 11. **Reports and Project overview open as Vikram Nair (PM)** so the Restricted states show by default. The `viewAs` tweak switches to Asha Rao.
+12. **`-webkit-backdrop-filter` must come before `backdrop-filter`.** The CSS minifier keeps only the last of the two, so the reverse order shipped no blur in Chromium. `tests/shell.spec.ts` asserts the computed blur.
+13. **Stories set their starting URL with `parameters.route`.** The Storybook decorator already provides the router, and a second one crashes the story.
+14. **Team bottom bar:** More opens a menu with Expenses, Leave and Profile, because the brief lists five tabs but six Team destinations plus Profile.
+15. **Mock view-as:** the avatar menu switches viewer, and `?as=P04` sets the starting viewer for screenshots. Nothing is persisted, including the theme choice.
+16. **Screen-reader names use visible text.** Controls build their name from their content rather than `aria-label` so the visible label is always part of the name (WCAG 2.5.3). Calendar days read "4 Nov 2026" for that reason, while displayed dates stay "04 Nov 2026".
