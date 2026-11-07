@@ -62,6 +62,9 @@
 .avatar-group { display: inline-flex; align-items: center; }
 .avatar-group > * { background: var(--surface); border-radius: 50%; }
 .avatar-group > * + * { margin-left: -4px; }
+/* Codes must stay legible, so they sit side by side instead of overlapping. */
+.avatar-group--spaced { gap: 2px; }
+.avatar-group--spaced > * + * { margin-left: 0; }
 .avatar-group .avatar { box-shadow: 0 0 0 2px var(--surface); background: var(--surface-muted); }
 
 /* State blocks */

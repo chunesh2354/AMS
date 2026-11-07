@@ -17,7 +17,7 @@ export function AvatarGroup({ names, size = 28, max = 3, text }: AvatarGroupProp
   const shown = names.slice(0, max);
   const extra = names.length - shown.length;
   return (
-    <span className="avatar-group">
+    <span className={text ? 'avatar-group avatar-group--spaced' : 'avatar-group'}>
       {shown.map((n) => <Tooltip key={n} text={n}><span tabIndex={0}><Avatar name={n} size={size} text={text?.(n)} /></span></Tooltip>)}
       {extra > 0 && <span className={`avatar avatar--${size}`} role="img" aria-label={`${extra} more: ${names.slice(max).join(', ')}`}>+{extra}</span>}
     </span>
