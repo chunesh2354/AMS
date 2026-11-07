@@ -2,21 +2,20 @@ import {
   AGEING, APPROVALS, ATTENTION, ATTENTION_FENCED, AVAILABILITY, CONTRIBUTION, LEAVE, NOTIFICATIONS, PEOPLE, PERSON_ACTIVITY, PROJECTS,
   PROJECT_ATTENTION, QUEUES, READY_TO_BILL, UTILIZATION, WORKING_PATTERNS, defaultAvailability,
 } from '../mock/studio-meridian';
-import type { ActivityEvent, Approval, AttentionItem, Fenced, LeaveRequest, NotificationGroupData, Overview, Person, ProjectView, Role, WeekAvailability } from './types';
+import { fence, hasFinanceAccess, reply, type ViewerRef } from './access';
+import type { ActivityEvent, Approval, AttentionItem, Fenced, LeaveRequest, NotificationGroupData, Overview, Person, ProjectView, WeekAvailability } from './types';
 
 export * from './types';
+export * from './planning';
+export * from './work';
+export * from './commercial';
+export * from './team';
 
 /**
  * The only door between screens and data. Each function returns mock data today and keeps its
  * signature when the backend replaces it. Fencing happens here, as it will on the server.
  */
-export type ViewerRef = { id: string; roles: Role[] };
-
-export const hasFinanceAccess = (v: ViewerRef) => v.roles.includes('principal') || v.roles.includes('finance');
-export const canSeeRatesTab = (v: ViewerRef) => !v.roles.every((r) => r === 'staff');
-
-const fence = <T,>(allowed: boolean, value: T): Fenced<T> => (allowed ? { restricted: false, value } : { restricted: true });
-const reply = <T,>(value: T): Promise<T> => Promise.resolve(value);
+export { canSeeRatesTab, hasFinanceAccess, type ViewerRef } from './access';
 
 export function getOverview(viewer: ViewerRef): Promise<Overview> {
   const finance = hasFinanceAccess(viewer);
@@ -57,7 +56,8 @@ const toView = (code: string, viewer: ViewerRef): ProjectView | null => {
 };
 export const getProjects = (viewer: ViewerRef): Promise<ProjectView[]> => reply(PROJECTS.map((p) => toView(p.code, viewer)!));
 export const getProject = (code: string, viewer: ViewerRef): Promise<ProjectView | null> => reply(toView(code, viewer));
-export const getProjectAttention = (code: string): Promise<AttentionItem[]> => reply(PROJECT_ATTENTION[code] ?? []);
+export const getProjectAttention = (code: string, viewer: ViewerRef): Promise<AttentionItem[]> =>
+  reply((PROJECT_ATTENTION[code] ?? []).map((a) => (!hasFinanceAccess(viewer) && ATTENTION_FENCED[a.id] ? { ...a, detail: ATTENTION_FENCED[a.id] } : a)));
 
 export const getApprovals = (): Promise<Approval[]> => reply(APPROVALS);
 export const getNotifications = (): NotificationGroupData[] => NOTIFICATIONS;

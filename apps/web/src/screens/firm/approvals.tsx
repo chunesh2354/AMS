@@ -16,6 +16,7 @@ import { QueueRail } from '../../ui/QueueRail';
 import { Sheet } from '../../ui/Sheet';
 import { useToast } from '../../ui/Toast';
 import { useMediaQuery } from '../../ui/useMediaQuery';
+import { GoTo } from '../shared/go-to';
 
 const QUEUES: ('All' | ApprovalType)[] = ['All', 'Time', 'Leave', 'Expenses', 'Bills', 'Changes', 'Billing drafts'];
 
@@ -103,7 +104,7 @@ export function ApprovalsScreen() {
           items={QUEUES.map((q) => ({ key: q, label: q, count: q === 'All' ? open.length : open.filter((a) => a.type === q).length }))}
         />
         {effective !== 'ready'
-          ? <ListStateBlock state={effective} label="Approvals" onRetry={retry} capability="approve work" rows={8} empty={{ message: 'Nothing is waiting for you here.', action: queue !== 'All' ? <Button variant="primary" onClick={() => setQueue('All')}>See all queues</Button> : undefined }} />
+          ? <ListStateBlock state={effective} label="Approvals" onRetry={retry} capability="approve work" rows={8} empty={{ message: 'Nothing is waiting for you here.', action: queue !== 'All' ? <Button variant="primary" onClick={() => setQueue('All')}>See all queues</Button> : <GoTo to="/firm/overview">Back to Overview</GoTo> }} />
           : (
             <section className="solid-panel" aria-label="Approval items">
               <div className="inbox__toolbar">

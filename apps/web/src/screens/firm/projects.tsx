@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FolderKanban } from 'lucide-react';
-import { getProjects, personName, type ProjectView } from '../../api';
+import { getPeople, getProjects, personName, type ProjectView } from '../../api';
+import { CreateProjectSheet } from './create-project-sheet';
 import { useResource } from '../../api/useResource';
 import { useSession } from '../../app/session';
 import { Avatar } from '../../ui/Avatar';
@@ -20,6 +21,8 @@ export function ProjectsScreen() {
   const navigate = useNavigate();
   const { viewer } = useSession();
   const [params] = useSearchParams();
+  const [creating, setCreating] = useState(params.get('new') === '1');
+  const people = useResource(getPeople, []);
   const { state, data, retry } = useResource(() => getProjects(viewer), [viewer.id]);
   const projects = useMemo(() => data ?? [], [data]);
 
@@ -58,14 +61,15 @@ export function ProjectsScreen() {
       <PageHeader
         title="Projects"
         meta={state !== 'loading' && <span className="t-numeric ink-2">{projects.length} projects</span>}
-        primaryAction={<Button variant="primary">Create project</Button>}
+        primaryAction={<Button variant="primary" onClick={() => setCreating(true)}>Create project</Button>}
       />
       <FilterBar filters={filters} />
       <DataTable
         label="Projects" columns={columns} rows={state === 'empty' ? [] : rows} rowKey={(p) => p.code} state={state === 'ready' && !rows.length ? 'empty' : state}
         onRetry={retry} capability="view projects" columnPicker onRowClick={(p) => navigate(`/firm/projects/${p.code}`)}
-        empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: <Button variant="primary">Create project</Button> }}
+        empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> }}
       />
+      <CreateProjectSheet open={creating} onClose={() => setCreating(false)} people={people.data ?? []} />
     </>
   );
 }

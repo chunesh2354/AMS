@@ -1,4 +1,5 @@
 import type { ActivityEvent, Approval, AttentionItem, LeaveRequest, NotificationGroupData, Person, Project, QueueSummary, WeekAvailability } from '../api/types';
+import { ALLOCATIONS, LEAVE_WEEKS, PLAN_WEEKS } from './plan';
 
 /** The demo firm from section 2 of the brief. "Today" for every screen is 06 Nov 2026. */
 export const TODAY = '2026-11-06';
@@ -37,9 +38,14 @@ export const AVAILABILITY: Record<string, WeekAvailability[]> = {
   ],
 };
 
-export const defaultAvailability = (p: Person): WeekAvailability[] =>
-  ['02 Nov', '09 Nov', '16 Nov', '23 Nov', '30 Nov', '07 Dec', '14 Dec', '21 Dec'].map((w, i) =>
-    week(w, p.projects.length ? Math.max(0, Math.round(p.hoursPerWeek * 0.7) - i * 2) : 0, 2, w === '16 Nov' || w === '21 Dec' ? 8 : 0, 0, p.hoursPerWeek));
+/** Everyone but P05: two hours of commitments, holidays in the weeks of 16 Nov and 21 Dec, allocations from the plan. */
+export const weekAvailability = (p: Person, i: number): WeekAvailability => {
+  const w = PLAN_WEEKS[i];
+  const allocated = ALLOCATIONS.filter((a) => a.personId === p.id && a.week === i).reduce((s, a) => s + a.hours, 0);
+  const leave = LEAVE_WEEKS[p.id]?.[i] ?? 0;
+  return week(w, allocated, leave ? 0 : 2, w === '16 Nov' || w === '21 Dec' ? 8 : 0, leave, p.hoursPerWeek);
+};
+export const defaultAvailability = (p: Person): WeekAvailability[] => PLAN_WEEKS.slice(0, 8).map((_, i) => weekAvailability(p, i));
 
 export const WORKING_PATTERNS: Record<string, { from: string; to: string | null; label: string; detail?: string }[]> = {
   P05: [
@@ -127,7 +133,7 @@ export const QUEUES: QueueSummary[] = [
   { key: 'approvals', label: 'Pending approvals', count: 14, severity: 'warn', to: '/firm/approvals' },
   { key: 'overallocated', label: 'Overallocations', count: 1, severity: 'danger', to: '/firm/workload' },
   { key: 'overrun', label: 'Overrun forecasts', count: 1, severity: 'danger', to: '/firm/projects?risk=at-risk' },
-  { key: 'holds', label: 'Billing holds', count: 1, severity: 'neutral', to: '/firm/billing' },
+  { key: 'holds', label: 'Billing holds', count: 1, severity: 'neutral', to: '/firm/billing?tab=exceptions' },
   { key: 'overdue', label: 'Overdue invoices', count: 1, severity: 'danger', to: '/firm/receivables' },
 ];
 
@@ -145,6 +151,7 @@ export const ATTENTION: AttentionItem[] = [
 export const ATTENTION_FENCED: Record<string, string> = {
   x1: 'Orchard Developers · amount Restricted · follow-up Farah Khan',
   x2: 'Amounts Restricted · Karan Bhat',
+  pb1: 'Amounts Restricted',
 };
 
 export const READY_TO_BILL = 486000;
@@ -180,7 +187,7 @@ export const APPROVALS: Approval[] = [
   approval('ap11', 'Bills', 'Structural consultant', 'PRJ-01', 'Bill, 10% markup', '₹2,50,000', 6, 'Asha Rao', ['Consultant invoice']),
   approval('ap12', 'Changes', 'Vikram Nair', 'PRJ-01', 'Courtyard revision', '+40.00 h', 2, 'Asha Rao', ['Client email, courtyard option B']),
   approval('ap13', 'Billing drafts', 'Farah Khan', 'PRJ-01', 'Fixed-fee claim', '₹80,000', 1, 'Asha Rao'),
-  approval('ap14', 'Billing drafts', 'Farah Khan', 'PRJ-02', 'Hourly NTE, eligible only', '₹4,000', 1, 'Asha Rao'),
+  approval('ap14', 'Billing drafts', 'Farah Khan', 'PRJ-01', 'Consultant recharge, 10% markup', '₹2,75,000', 1, 'Asha Rao', ['Consultant invoice']),
 ];
 
 export const NOTIFICATIONS: NotificationGroupData[] = [
@@ -197,3 +204,8 @@ export const NOTIFICATIONS: NotificationGroupData[] = [
 
 export const OFFICES = ['Bengaluru'];
 export const PERMISSION_SETS = ['Principal', 'Project manager', 'Finance', 'Operations', 'Staff'];
+
+export * from './plan';
+export * from './work';
+export * from './commercial';
+export * from './team';

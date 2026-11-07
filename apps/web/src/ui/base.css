@@ -61,4 +61,6 @@ svg { display: block; flex: none; }
   body::before { display: none; }
   html { background: white; }
   .glass, .glass--elevated { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  .sidenav, .topbar, .tabbar, .filters, .subnav, .pagehead__actions { display: none !important; }
+  .dt tbody tr > * { background: none !important; }
 }

@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
+import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import {
-  canSeeRatesTab, getAvailability, getPerson, getPersonActivity, getPersonLeave, getProjects, getRates, getWorkingPattern, personName, type Fenced, type LeaveRequest,
+  canSeeRatesTab, getAvailability, getPeople, getPerson, getPersonActivity, getPersonLeave, getProjects, getRates, getWorkingPattern, personName, type Fenced, type LeaveRequest,
 } from '../../api';
 import { useResource } from '../../api/useResource';
 import { useSession } from '../../app/session';
@@ -19,6 +20,7 @@ import { KpiTile } from '../../ui/KpiTile';
 import { ListStateBlock } from '../../ui/ListState';
 import { PageHeader } from '../../ui/PageHeader';
 import { StatusChip } from '../../ui/StatusChip';
+import { EditPersonSheet } from './person-sheets';
 
 const TABS = ['overview', 'access', 'projects', 'capacity', 'leave', 'rates', 'activity'] as const;
 type TabKey = (typeof TABS)[number];
@@ -117,6 +119,8 @@ export function PersonScreen() {
   const [params] = useSearchParams();
   const { viewer } = useSession();
   const { state, data: person, retry } = useResource(() => getPerson(id), [id]);
+  const everyone = useResource(getPeople, []);
+  const [editing, setEditing] = useState(false);
 
   const showRates = canSeeRatesTab(viewer);
   const tabs = TABS.filter((t) => t !== 'rates' || showRates);
@@ -155,7 +159,7 @@ export function PersonScreen() {
             <StatusChip size="sm" status={person.login} label={`Login ${person.login.toLowerCase()}`} />
           </>
         )}
-        secondaryActions={<Button>Edit person</Button>}
+        secondaryActions={<Button onClick={() => setEditing(true)}>Edit person</Button>}
         tabs={tabs.map((t) => ({ label: cap(t), to: `?tab=${t}`, active: t === tab }))}
       />
       {tab === 'overview' && person && <OverviewTab id={id} projects={person.projects.length} missingRate={person.costRate == null} />}
@@ -165,6 +169,7 @@ export function PersonScreen() {
       {tab === 'leave' && <Leave id={id} />}
       {tab === 'rates' && <Rates id={id} />}
       {tab === 'activity' && <Activity id={id} />}
+      <EditPersonSheet person={person ?? null} open={editing} onClose={() => setEditing(false)} people={everyone.data ?? []} />
     </>
   );
 }

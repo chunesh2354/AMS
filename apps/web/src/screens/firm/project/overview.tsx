@@ -13,14 +13,15 @@ import { ListStateBlock } from '../../../ui/ListState';
 import { Skeleton } from '../../../ui/Skeleton';
 import { formatGrouped, formatINR, formatPercent } from '../../../ui/format';
 import { TODAY } from '../../../mock/studio-meridian';
+import { GoTo } from '../../shared/go-to';
 
 export function ProjectOverviewScreen() {
   const { id = '' } = useParams();
   const { viewer } = useSession();
   const { state, data: p, retry } = useResource(() => getProject(id, viewer), [id, viewer.id]);
-  const attention = useResource(() => getProjectAttention(id), [id]);
+  const attention = useResource(() => getProjectAttention(id, viewer), [id, viewer.id]);
   if (state === 'error' || state === 'denied' || state === 'empty') {
-    return <ListStateBlock state={state} label="This project" onRetry={retry} capability="view this project" empty={{ message: 'This project has no data yet.' }} />;
+    return <ListStateBlock state={state} label="This project" onRetry={retry} capability="view this project" empty={{ message: 'This project has no data yet.', action: <GoTo to="/firm/projects">See all projects</GoTo> }} />;
   }
   if (!p || state === 'loading') {
     return <div className="grid-12">{Array.from({ length: 4 }, (_, i) => <div key={i} className="span-3"><Skeleton kind="card" /></div>)}</div>;

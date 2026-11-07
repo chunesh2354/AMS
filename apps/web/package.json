@@ -14,7 +14,7 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build -o storybook-static --quiet",
     "test:a11y": "playwright test tests/a11y.spec.ts",
-    "test:e2e": "playwright test tests/shell.spec.ts",
+    "test:e2e": "playwright test tests/shell.spec.ts tests/grids.spec.ts tests/audit.spec.ts tests/routes-a11y.spec.ts",
     "screens": "playwright test tests/screens.spec.ts"
   },
   "dependencies": {

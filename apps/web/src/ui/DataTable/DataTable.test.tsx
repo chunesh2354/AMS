@@ -45,3 +45,20 @@ describe('DataTable', () => {
     expect(onEdit).toHaveBeenCalledWith(rows[0], 'AshaX');
   });
 });
+
+it('opens a clickable row from the keyboard', async () => {
+  const onRowClick = vi.fn();
+  render(<DataTable label="Rows" columns={[{ key: 'a', header: 'A', value: (r: { a: string }) => r.a }]} rows={[{ a: 'one' }]} rowKey={(r) => r.a} onRowClick={onRowClick} />);
+  const row = screen.getByRole('rowheader', { name: 'one' }).closest('tr')!;
+  row.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(onRowClick).toHaveBeenCalledWith({ a: 'one' });
+});
+
+it('expands a row and tints it by tone', async () => {
+  render(<DataTable label="Rows" columns={[{ key: 'a', header: 'A', value: (r: { a: string }) => r.a }]} rows={[{ a: 'one' }]} rowKey={(r) => r.a} rowTone={() => 'warn'} expand={{ render: () => 'More detail' }} />);
+  expect(screen.getByRole('rowheader', { name: 'one' }).closest('tr')).toHaveClass('dt__row--warn');
+  expect(screen.queryByText('More detail')).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'Show details for one' }));
+  expect(screen.getByText('More detail')).toBeInTheDocument();
+});

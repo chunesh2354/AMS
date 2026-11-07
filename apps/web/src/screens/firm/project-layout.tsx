@@ -1,4 +1,5 @@
-import { Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Outlet, useParams } from 'react-router-dom';
+import { useOverlays } from '../../app/overlays';
 import { getProject } from '../../api';
 import { useResource } from '../../api/useResource';
 import { useSession } from '../../app/session';
@@ -12,7 +13,7 @@ const TABS = ['phases', 'tasks', 'staffing', 'time', 'costs', 'billing', 'change
 
 export function ProjectLayout() {
   const { id = '' } = useParams();
-  const navigate = useNavigate();
+  const { openLogTime } = useOverlays();
   const { viewer } = useSession();
   const { state, data: p } = useResource(() => getProject(id, viewer), [id, viewer.id]);
   const base = `/firm/projects/${id}`;
@@ -36,7 +37,7 @@ export function ProjectLayout() {
             <span className="t-body-sm ink-2">{p.client} · {p.contract}</span>
           </>
         )}
-        primaryAction={<Button variant="primary" onClick={() => navigate('/me/time')}>Log time</Button>}
+        primaryAction={<Button variant="primary" onClick={() => openLogTime()}>Log time</Button>}
         tabs={[{ label: 'Overview', to: base, end: true }, ...TABS.map((t) => ({ label: t[0].toUpperCase() + t.slice(1), to: `${base}/${t}` }))]}
       />
       {p?.status === 'On hold' && <InlineAlert variant="info" title={`${p.code} is on hold`}>Allocations are retained until the hold is lifted.</InlineAlert>}

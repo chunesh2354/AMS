@@ -11,6 +11,7 @@ import { PageHeader } from '../../ui/PageHeader';
 import { Segmented } from '../../ui/Segmented';
 import { StatusChip } from '../../ui/StatusChip';
 import { AddPersonSheet } from './add-person-sheet';
+import { DeactivateSheet } from './person-sheets';
 
 type Tab = 'Active' | 'Invited' | 'Pending' | 'Deactivated';
 const options = (values: string[]) => [...new Set(values)].sort().map((v) => ({ value: v, label: v }));
@@ -20,6 +21,7 @@ export function PeopleScreen() {
   const [params, setParams] = useSearchParams();
   const { state, data, retry } = useResource(getPeople, []);
   const [adding, setAdding] = useState(params.get('add') === '1');
+  const [deactivating, setDeactivating] = useState<Person | null>(null);
   const tab = (params.get('status') as Tab) || 'Active';
   const people = useMemo(() => data ?? [], [data]);
 
@@ -92,10 +94,11 @@ export function PeopleScreen() {
         empty={{ icon: <Users size={20} strokeWidth={1.5} aria-hidden />, message: emptyFor[tab], action: <Button variant="primary" onClick={() => setAdding(true)}>Add person</Button> }}
         rowActions={(p) => [
           { label: 'View profile', icon: <Eye size={16} strokeWidth={1.5} aria-hidden />, onSelect: () => navigate(`/firm/people/${p.id}`) },
-          { label: 'Deactivate', icon: <UserMinus size={16} strokeWidth={1.5} aria-hidden />, danger: true },
+          { label: 'Deactivate', icon: <UserMinus size={16} strokeWidth={1.5} aria-hidden />, danger: true, onSelect: () => setDeactivating(p) },
         ]}
       />
       <AddPersonSheet open={adding} onClose={() => setAdding(false)} people={people} />
+      <DeactivateSheet person={deactivating} onClose={() => setDeactivating(null)} />
     </>
   );
 }

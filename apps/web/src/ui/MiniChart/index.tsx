@@ -9,18 +9,21 @@ const show = (d: ChartDatum) => d.display ?? String(d.value);
 
 function Bars({ data }: { data: ChartDatum[] }) {
   const max = Math.max(...data.map((d) => d.value), 1);
-  const w = 100 / data.length;
+  const columns = { gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` };
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 80, borderBottom: '1px solid var(--line-strong)' }}>
+      <div className="chart__bars" style={columns}>
         {data.map((d) => (
           <Tooltip key={d.label} text={`${d.label}: ${show(d)}`}>
             <span
-              tabIndex={0} role="img" aria-label={`${d.label}: ${show(d)}`} className="chart__mark"
-              style={{ display: 'block', width: `${w}%`, flex: 1, minWidth: 4, maxWidth: 24, height: `${(d.value / max) * 80}px`, background: fill(d.color), borderRadius: '4px 4px 0 0' }}
+              tabIndex={0} role="img" aria-label={`${d.label}: ${show(d)}`} className="chart__mark chart__bar"
+              style={{ height: `${Math.max((d.value / max) * 80, 1)}px`, background: fill(d.color) }}
             />
           </Tooltip>
         ))}
+      </div>
+      <div className="chart__barlabels" style={columns} aria-hidden>
+        {data.map((d) => <span key={d.label}>{d.label}</span>)}
       </div>
     </div>
   );

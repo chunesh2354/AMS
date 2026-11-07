@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, MoreHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, MoreHorizontal } from 'lucide-react';
 import { Avatar } from '../Avatar';
 import { Button } from '../Button';
 import { Checkbox } from '../Checkbox';
@@ -30,8 +30,12 @@ export type Column<T> = {
   width?: number | string;
   /** Totals row value for this column. */
   total?: number | ((rows: T[]) => number);
+  /** Totals row text, when the unit already sits in the header. */
+  formatTotal?: (n: number) => string;
   /** Enables inline editing. */
   onEdit?: (row: T, next: string) => void;
+  /** Marks one cell as invalid, such as an import error. */
+  cellError?: (row: T) => boolean;
 };
 
 export type DataTableState = 'ready' | 'loading' | 'empty' | 'error' | 'denied';
@@ -53,6 +57,14 @@ export type DataTableProps<T> = {
   rowActions?: (row: T) => MenuItem[];
   onRowClick?: (row: T) => void;
   maxHeight?: number | string;
+  /** Marks the row whose detail is showing elsewhere on the page. */
+  activeKey?: string;
+  /** Narrower cell padding, for tables with many money columns. */
+  tight?: boolean;
+  /** Tints a whole row: returned lines are warn, unclassified lines are danger. */
+  rowTone?: (row: T) => 'warn' | 'danger' | undefined;
+  /** Adds a disclosure button to each row and renders content under it when open. */
+  expand?: { render: (row: T) => ReactNode; isExpandable?: (row: T) => boolean; defaultOpen?: string[] };
 };
 
 const NUMERIC: ColumnType[] = ['number', 'money', 'hours'];
@@ -63,7 +75,7 @@ function formatValue(type: ColumnType, v: unknown): ReactNode {
     case 'number': return formatGrouped(v as number);
     case 'money': return formatINR(v as number);
     case 'hours': return formatHours(v as number);
-    case 'date': return formatDate(v as string);
+    case 'date': return <span className="t-numeric">{formatDate(v as string)}</span>;
     case 'status': return <StatusChip size="sm" status={v as Status} />;
     case 'person': return <span className="dt__person"><Avatar name={v as string} size={20} />{v as string}</span>;
     default: return v as ReactNode;
@@ -90,11 +102,12 @@ function EditCell({ text, label, onCommit }: { text: string; label: string; onCo
 /** Solid surface table. Every list state is built in: loading, empty, error and permission-denied. */
 export function DataTable<T>({
   label, columns, rows, rowKey, density = 'comfortable', state = 'ready', empty, errorMessage, onRetry, capability = 'view this list',
-  columnPicker, selection, groupBy, rowActions, onRowClick, maxHeight,
+  columnPicker, selection, groupBy, rowActions, onRowClick, maxHeight, rowTone, expand, activeKey, tight,
 }: DataTableProps<T>) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [hidden, setHidden] = useState(() => new Set(columns.filter((c) => c.hiddenByDefault).map((c) => c.key)));
   const visible = columns.filter((c) => !hidden.has(c.key));
+  const [opened, setOpened] = useState<string[]>(expand?.defaultOpen ?? []);
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -128,10 +141,10 @@ export function DataTable<T>({
   const someOn = selection && !allOn && selectable.some((k) => selection.selected.includes(k));
   const hasTotals = visible.some((c) => c.total != null);
   const toggleSort = (key: string) => setSort((s) => (s?.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
-  const span = visible.length + (selection ? 1 : 0) + (rowActions ? 1 : 0);
+  const span = visible.length + (selection ? 1 : 0) + (rowActions ? 1 : 0) + (expand ? 1 : 0);
 
   return (
-    <div className={cx('dt', density === 'dense' && 'dt--dense')}>
+    <div className={cx('dt', density === 'dense' && 'dt--dense', tight && 'dt--tight')}>
       {columnPicker && (
         <div className="dt__tools">
           <span>{rows.length} {rows.length === 1 ? 'row' : 'rows'}</span>
@@ -156,6 +169,7 @@ export function DataTable<T>({
                   <Checkbox hideLabel label="Select all" checked={!!allOn} indeterminate={!!someOn} onChange={(e) => selection.onChange(e.target.checked ? selectable : [])} />
                 </th>
               )}
+              {expand && <th className="dt__expcol" scope="col"><span className="sr-only">Details</span></th>}
               {visible.map((c) => {
                 const num = NUMERIC.includes(c.type ?? 'text');
                 const active = sort?.key === c.key;
@@ -180,8 +194,12 @@ export function DataTable<T>({
                 {g.rows.map((row) => {
                   const k = rowKey(row);
                   const on = selection?.selected.includes(k);
+                  const tone = rowTone?.(row);
+                  const canOpen = expand && (expand.isExpandable?.(row) ?? true);
+                  const isOpen = opened.includes(k);
                   return (
-                    <tr key={k} aria-selected={selection ? !!on : undefined} className={cx('dt__row', onRowClick && 'dt__row--click')} onClick={() => onRowClick?.(row)}>
+                    <Fragment key={k}>
+                    <tr aria-selected={selection ? !!on : undefined} className={cx('dt__row', onRowClick && 'dt__row--click', tone && `dt__row--${tone}`, activeKey === k && 'dt__row--active')} aria-current={activeKey === k ? 'true' : undefined} tabIndex={onRowClick ? 0 : undefined} onClick={() => onRowClick?.(row)} onKeyDown={onRowClick ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onRowClick(row); } } : undefined}>
                       {selection && (
                         <td className="dt__check" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
@@ -189,6 +207,15 @@ export function DataTable<T>({
                             disabled={!(selection.isSelectable?.(row) ?? true)}
                             onChange={(e) => selection.onChange(e.target.checked ? [...selection.selected, k] : selection.selected.filter((x) => x !== k))}
                           />
+                        </td>
+                      )}
+                      {expand && (
+                        <td className="dt__expcol" onClick={(e) => e.stopPropagation()}>
+                          {canOpen && (
+                            <button type="button" className="dt__expbtn" aria-expanded={isOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${String(visible[0]?.value(row) ?? k)}`} onClick={() => setOpened((o) => (isOpen ? o.filter((x) => x !== k) : [...o, k]))}>
+                              <ChevronRight size={16} strokeWidth={1.5} aria-hidden />
+                            </button>
+                          )}
                         </td>
                       )}
                       {visible.map((c, i) => {
@@ -199,7 +226,7 @@ export function DataTable<T>({
                           : c.render ? c.render(row)
                           : c.onEdit ? <EditCell text={String(raw ?? '')} label={`${c.header}`} onCommit={(v) => c.onEdit?.(row, v)} />
                           : formatValue(t, raw);
-                        const cls = cx(NUMERIC.includes(t) && !fenced && 'dt__num', NUMERIC.includes(t) && fenced && 'dt__num');
+                        const cls = cx(NUMERIC.includes(t) && 'dt__num', c.cellError?.(row) && 'dt__cell--danger');
                         return i === 0 ? <th key={c.key} scope="row" className={cls}>{inner}</th>
                           : <td key={c.key} className={cls}>{inner}</td>;
                       })}
@@ -211,6 +238,8 @@ export function DataTable<T>({
                         </td>
                       )}
                     </tr>
+                    {canOpen && isOpen && <tr className="dt__expand"><td colSpan={span}>{expand.render(row)}</td></tr>}
+                    </Fragment>
                   );
                 })}
               </Fragment>
@@ -220,11 +249,12 @@ export function DataTable<T>({
             <tfoot>
               <tr className="dt__totals">
                 {selection && <td />}
+                {expand && <td />}
                 {visible.map((c, i) => {
                   const num = NUMERIC.includes(c.type ?? 'text');
                   if (c.total == null) return <td key={c.key}>{i === 0 ? 'Total' : ''}</td>;
                   const n = typeof c.total === 'function' ? c.total(rows) : c.total;
-                  return <td key={c.key} className={cx(num && 'dt__num')}>{formatValue(c.type ?? 'number', n)}</td>;
+                  return <td key={c.key} className={cx(num && 'dt__num')}>{c.formatTotal ? c.formatTotal(n) : formatValue(c.type ?? 'number', n)}</td>;
                 })}
                 {rowActions && <td />}
               </tr>

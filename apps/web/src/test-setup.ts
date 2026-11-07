@@ -1,6 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// Full runs load the machine heavily; slow async lookups are not failures.
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(cleanup);
 

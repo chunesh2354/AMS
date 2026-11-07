@@ -3,13 +3,35 @@ import { useSession, canUseFirm } from './app/session';
 import { ShellLayout } from './layouts/ShellLayout';
 import { PermissionDenied } from './ui/PermissionDenied';
 import { PageHeader } from './ui/PageHeader';
-import { Placeholder } from './screens/Placeholder';
 import { ApprovalsScreen } from './screens/firm/approvals';
 import { OverviewScreen } from './screens/firm/overview';
 import { PeopleScreen } from './screens/firm/people';
 import { PersonScreen } from './screens/firm/person';
 import { ProjectLayout } from './screens/firm/project-layout';
 import { ProjectOverviewScreen } from './screens/firm/project/overview';
+import { ProjectPhasesScreen } from './screens/firm/project/phases';
+import { ProjectStaffingScreen } from './screens/firm/project/staffing';
+import { ProjectTasksScreen } from './screens/firm/project/tasks';
+import { ProjectActivityScreen } from './screens/firm/project/activity';
+import { ProjectChangesScreen } from './screens/firm/project/changes';
+import { ProjectCostsScreen } from './screens/firm/project/costs';
+import { ProjectFilesScreen } from './screens/firm/project/files';
+import { ProjectTimeScreen } from './screens/firm/project/time';
+import { PipelineScreen } from './screens/firm/pipeline';
+import { ProposalScreen } from './screens/firm/proposal';
+import { BillingScreen } from './screens/firm/billing';
+import { ProjectBillingScreen } from './screens/firm/project/billing';
+import { ReceivablesScreen } from './screens/firm/receivables';
+import { ReportsScreen } from './screens/firm/reports';
+import { SettingsScreen } from './screens/firm/settings';
+import { WorkloadScreen } from './screens/firm/workload';
+import { MyDayScreen } from './screens/me/home';
+import { MyExpensesScreen } from './screens/me/expenses';
+import { MyLeaveScreen } from './screens/me/leave';
+import { MyProfileScreen } from './screens/me/profile';
+import { MyScheduleScreen } from './screens/me/schedule';
+import { MyTimeScreen } from './screens/me/time';
+import { MyWorkScreen } from './screens/me/work';
 import { ProjectsScreen } from './screens/firm/projects';
 
 function FirmGuard() {
@@ -22,12 +44,6 @@ function FirmGuard() {
     </>
   );
 }
-
-const page = (path: string, title: string, task: string, crumb?: { label: string; to: string }): RouteObject => ({
-  path,
-  element: <Placeholder title={title} task={task} crumbs={crumb ? [crumb, { label: title }] : undefined} />,
-});
-const tab = (path: string, title: string, task: string): RouteObject => ({ path, element: <Placeholder embedded title={title} task={task} /> });
 
 /** Route paths come from section 9 of the brief and must not change. */
 export const routes: RouteObject[] = [
@@ -42,33 +58,33 @@ export const routes: RouteObject[] = [
         { path: 'overview', element: <OverviewScreen /> },
         { path: 'people', element: <PeopleScreen /> },
         { path: 'people/:id', element: <PersonScreen /> },
-        page('workload', 'Workload', 'U-13'),
-        page('pipeline', 'Pipeline', 'U-15'),
-        page('proposals/:id', 'Proposal', 'U-15', { label: 'Pipeline', to: '/firm/pipeline' }),
+        { path: 'workload', element: <WorkloadScreen /> },
+        { path: 'pipeline', element: <PipelineScreen /> },
+        { path: 'proposals/:id', element: <ProposalScreen /> },
         { path: 'projects', element: <ProjectsScreen /> },
         {
           path: 'projects/:id',
           element: <ProjectLayout />,
           children: [
             { index: true, element: <ProjectOverviewScreen /> },
-            tab('phases', 'Phases', 'U-11'),
-            tab('tasks', 'Tasks', 'U-12'),
-            tab('staffing', 'Staffing', 'U-13'),
-            tab('time', 'Time', 'U-14'),
-            tab('costs', 'Costs', 'U-14'),
-            tab('billing', 'Billing', 'U-16'),
-            tab('changes', 'Changes', 'U-14'),
-            tab('files', 'Files', 'U-14'),
-            tab('activity', 'Activity', 'U-14'),
+            { path: 'phases', element: <ProjectPhasesScreen /> },
+            { path: 'tasks', element: <ProjectTasksScreen /> },
+            { path: 'staffing', element: <ProjectStaffingScreen /> },
+            { path: 'time', element: <ProjectTimeScreen /> },
+            { path: 'costs', element: <ProjectCostsScreen /> },
+            { path: 'billing', element: <ProjectBillingScreen /> },
+            { path: 'changes', element: <ProjectChangesScreen /> },
+            { path: 'files', element: <ProjectFilesScreen /> },
+            { path: 'activity', element: <ProjectActivityScreen /> },
           ],
         },
         { path: 'approvals', element: <ApprovalsScreen /> },
-        page('billing', 'Billing', 'U-16'),
-        page('receivables', 'Receivables', 'U-17'),
+        { path: 'billing', element: <BillingScreen /> },
+        { path: 'receivables', element: <ReceivablesScreen /> },
         { path: 'reports', element: <Navigate to="utilization" replace /> },
-        page('reports/:key', 'Reports', 'U-18'),
+        { path: 'reports/:key', element: <ReportsScreen /> },
         { path: 'settings', element: <Navigate to="profile" replace /> },
-        page('settings/*', 'Settings', 'U-18'),
+        { path: 'settings/*', element: <SettingsScreen /> },
       ],
     }],
   },
@@ -77,13 +93,13 @@ export const routes: RouteObject[] = [
     element: <ShellLayout iface="team" />,
     children: [
       { index: true, element: <Navigate to="home" replace /> },
-      page('home', 'My day', 'U-19'),
-      page('work', 'My work', 'U-19'),
-      page('schedule', 'My schedule', 'U-13'),
-      page('time', 'My time', 'U-19'),
-      page('expenses', 'My expenses', 'U-19'),
-      page('leave', 'My leave', 'U-19'),
-      page('profile', 'My profile', 'U-19'),
+      { path: 'home', element: <MyDayScreen /> },
+      { path: 'work', element: <MyWorkScreen /> },
+      { path: 'schedule', element: <MyScheduleScreen /> },
+      { path: 'time', element: <MyTimeScreen /> },
+      { path: 'expenses', element: <MyExpensesScreen /> },
+      { path: 'leave', element: <MyLeaveScreen /> },
+      { path: 'profile', element: <MyProfileScreen /> },
     ],
   },
   { path: '*', element: <Navigate to="/firm/overview" replace /> },
