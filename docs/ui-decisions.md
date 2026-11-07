@@ -11,3 +11,5 @@ Choices made where the brief was ambiguous or could not be met as written. The c
 7. **Popovers and sheets may sit over solid surfaces.** Section 5.2 says glass sits on the plane, but section 7 requires glass calendars and sheets over forms and tables. Stacking still never exceeds two.
 8. **Firm below 768 px** gets a bottom bar with Overview, Approvals and More, so those two stay usable as section 11 requires.
 9. **Mock values the brief does not give** (Utilization 78%, Contribution ₹6,40,000, the PRJ-01 entitlement split, phase budgets other than Working drawings) are placeholders that add up to the brief's totals.
+10. **Canvas mock data beyond the brief.** Pipeline opportunities, the Harbour Studio Offices proposal, task names, leave balances and integration modes are invented placeholders. Amounts are kept consistent across screens: ready to bill ₹4,86,000 is ₹80,000 from PRJ-01 plus ₹4,06,000 from PRJ-02, and the only outstanding invoice is INV-DEMO-0007.
+11. **Reports and Project overview open as Vikram Nair (PM)** so the Restricted states show by default. The `viewAs` tweak switches to Asha Rao.
