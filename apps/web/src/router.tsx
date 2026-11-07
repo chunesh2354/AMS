@@ -4,7 +4,13 @@ import { ShellLayout } from './layouts/ShellLayout';
 import { PermissionDenied } from './ui/PermissionDenied';
 import { PageHeader } from './ui/PageHeader';
 import { Placeholder } from './screens/Placeholder';
+import { ApprovalsScreen } from './screens/firm/approvals';
+import { OverviewScreen } from './screens/firm/overview';
+import { PeopleScreen } from './screens/firm/people';
+import { PersonScreen } from './screens/firm/person';
 import { ProjectLayout } from './screens/firm/project-layout';
+import { ProjectOverviewScreen } from './screens/firm/project/overview';
+import { ProjectsScreen } from './screens/firm/projects';
 
 function FirmGuard() {
   const { viewer } = useSession();
@@ -33,18 +39,18 @@ export const routes: RouteObject[] = [
       element: <FirmGuard />,
       children: [
         { index: true, element: <Navigate to="overview" replace /> },
-        page('overview', 'Overview', 'U-06'),
-        page('people', 'People', 'U-07'),
-        page('people/:id', 'Person', 'U-08', { label: 'People', to: '/firm/people' }),
+        { path: 'overview', element: <OverviewScreen /> },
+        { path: 'people', element: <PeopleScreen /> },
+        { path: 'people/:id', element: <PersonScreen /> },
         page('workload', 'Workload', 'U-13'),
         page('pipeline', 'Pipeline', 'U-15'),
         page('proposals/:id', 'Proposal', 'U-15', { label: 'Pipeline', to: '/firm/pipeline' }),
-        page('projects', 'Projects', 'U-10'),
+        { path: 'projects', element: <ProjectsScreen /> },
         {
           path: 'projects/:id',
           element: <ProjectLayout />,
           children: [
-            { index: true, element: <Placeholder embedded title="Overview" task="U-10" /> },
+            { index: true, element: <ProjectOverviewScreen /> },
             tab('phases', 'Phases', 'U-11'),
             tab('tasks', 'Tasks', 'U-12'),
             tab('staffing', 'Staffing', 'U-13'),
@@ -56,7 +62,7 @@ export const routes: RouteObject[] = [
             tab('activity', 'Activity', 'U-14'),
           ],
         },
-        page('approvals', 'Approvals', 'U-09'),
+        { path: 'approvals', element: <ApprovalsScreen /> },
         page('billing', 'Billing', 'U-16'),
         page('receivables', 'Receivables', 'U-17'),
         { path: 'reports', element: <Navigate to="utilization" replace /> },

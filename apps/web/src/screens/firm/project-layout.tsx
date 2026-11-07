@@ -1,29 +1,45 @@
-import { Outlet, useParams } from 'react-router-dom';
+import { Outlet, useNavigate, useParams } from 'react-router-dom';
+import { getProject } from '../../api';
+import { useResource } from '../../api/useResource';
+import { useSession } from '../../app/session';
 import { Button } from '../../ui/Button';
+import { EmptyState } from '../../ui/EmptyState';
+import { InlineAlert } from '../../ui/InlineAlert';
 import { PageHeader } from '../../ui/PageHeader';
 import { StatusChip } from '../../ui/StatusChip';
-import type { Status } from '../../ui/status-colors';
 
-const PROJECTS: Record<string, { name: string; status: Status; risk?: Status }> = {
-  'PRJ-01': { name: 'Lakeview Residence', status: 'Active', risk: 'Overrun' },
-  'PRJ-02': { name: 'Orchard Commercial Block', status: 'Active' },
-  'PRJ-03': { name: 'Heritage Cafe Refit', status: 'On hold' },
-};
 const TABS = ['phases', 'tasks', 'staffing', 'time', 'costs', 'billing', 'changes', 'files', 'activity'];
 
 export function ProjectLayout() {
   const { id = '' } = useParams();
-  const p = PROJECTS[id] ?? { name: id, status: 'Draft' as Status };
+  const navigate = useNavigate();
+  const { viewer } = useSession();
+  const { state, data: p } = useResource(() => getProject(id, viewer), [id, viewer.id]);
   const base = `/firm/projects/${id}`;
+  if (state === 'ready' && !p) {
+    return (
+      <>
+        <PageHeader title="Project" breadcrumb={[{ label: 'Projects', to: '/firm/projects' }, { label: id }]} />
+        <div className="solid-panel"><EmptyState message="No project has that code." /></div>
+      </>
+    );
+  }
   return (
     <>
       <PageHeader
-        title={p.name}
+        title={p?.name ?? id}
         breadcrumb={[{ label: 'Projects', to: '/firm/projects' }, { label: id }]}
-        meta={<><StatusChip size="sm" status={p.status} />{p.risk && <StatusChip size="sm" status={p.risk} />}</>}
-        primaryAction={<Button variant="primary">Log time</Button>}
+        meta={p && (
+          <>
+            <StatusChip size="sm" status={p.status} />
+            {p.risk.status !== p.status && p.risk.label !== 'On track' && <StatusChip size="sm" status={p.risk.status} />}
+            <span className="t-body-sm ink-2">{p.client} · {p.contract}</span>
+          </>
+        )}
+        primaryAction={<Button variant="primary" onClick={() => navigate('/me/time')}>Log time</Button>}
         tabs={[{ label: 'Overview', to: base, end: true }, ...TABS.map((t) => ({ label: t[0].toUpperCase() + t.slice(1), to: `${base}/${t}` }))]}
       />
+      {p?.status === 'On hold' && <InlineAlert variant="info" title={`${p.code} is on hold`}>Allocations are retained until the hold is lifted.</InlineAlert>}
       <Outlet />
     </>
   );

@@ -4,10 +4,10 @@ import { cx } from '../cx';
 
 export type TextFieldProps = FieldBaseProps & Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> & { mono?: boolean };
 
-export function TextField({ label, helper, error, prefix, suffix, dense, mono, className, ...input }: TextFieldProps) {
+export function TextField({ label, helper, error, prefix, suffix, dense, mono, className, id, ...input }: TextFieldProps) {
   return (
-    <Field {...{ label, helper, error, prefix, suffix, dense }} disabled={input.disabled} readOnly={input.readOnly}>
-      {(p) => <input {...p} {...input} className={cx('field__input', mono && 'field__input--mono', className)} />}
+    <Field {...{ label, helper, error, prefix, suffix, dense, id }} disabled={input.disabled} readOnly={input.readOnly}>
+      {(p) => <input {...input} {...p} className={cx('field__input', mono && 'field__input--mono', className)} />}
     </Field>
   );
 }

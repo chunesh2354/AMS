@@ -200,7 +200,7 @@ export function DataTable<T>({
                           : c.onEdit ? <EditCell text={String(raw ?? '')} label={`${c.header}`} onCommit={(v) => c.onEdit?.(row, v)} />
                           : formatValue(t, raw);
                         const cls = cx(NUMERIC.includes(t) && !fenced && 'dt__num', NUMERIC.includes(t) && fenced && 'dt__num');
-                        return i === 0 ? <th key={c.key} scope="row" className={cls} style={{ position: 'static', height: 'auto', border: 0, background: 'transparent', font: 'var(--text-body-sm)', fontWeight: 500, letterSpacing: 0, textTransform: 'none', color: 'var(--ink-1)', borderBottom: '1px solid var(--line)' }}>{inner}</th>
+                        return i === 0 ? <th key={c.key} scope="row" className={cls}>{inner}</th>
                           : <td key={c.key} className={cls}>{inner}</td>;
                       })}
                       {rowActions && (

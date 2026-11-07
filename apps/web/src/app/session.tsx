@@ -1,18 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { Role } from '../api/types';
+import { PEOPLE } from '../mock/studio-meridian';
 
 /**
  * Mock session for the UI build: who is viewing, and the theme. No auth and no persistence.
  * `?as=P04` picks the starting viewer, which is how screenshots open as Rohan Shetty.
  */
-export type Role = 'principal' | 'pm' | 'staff' | 'operations' | 'finance';
+export type { Role };
 export type Viewer = { id: string; name: string; title: string; roles: Role[] };
 
-export const VIEWERS: Viewer[] = [
-  { id: 'P01', name: 'Asha Rao', title: 'Principal', roles: ['principal'] },
-  { id: 'P02', name: 'Vikram Nair', title: 'Project architect', roles: ['pm'] },
-  { id: 'P04', name: 'Rohan Shetty', title: 'Senior architect', roles: ['staff'] },
-  { id: 'P10', name: 'Farah Khan', title: 'Operations', roles: ['operations', 'finance'] },
-];
+export const VIEWERS: Viewer[] = ['P01', 'P02', 'P04', 'P10'].map((id) => {
+  const p = PEOPLE.find((x) => x.id === id)!;
+  return { id: p.id, name: p.name, title: p.title, roles: p.roles };
+});
 
 export const canUseFirm = (v: Viewer) => v.roles.some((r) => r !== 'staff');
 
@@ -27,8 +27,8 @@ type Session = {
 
 const Ctx = createContext<Session | null>(null);
 
-export function SessionProvider({ children }: { children: ReactNode }) {
-  const [viewerId, setViewerId] = useState(() => new URLSearchParams(window.location.search).get('as') ?? 'P01');
+export function SessionProvider({ children, initialViewer }: { children: ReactNode; initialViewer?: string }) {
+  const [viewerId, setViewerId] = useState(() => initialViewer ?? new URLSearchParams(window.location.search).get('as') ?? 'P01');
   const [theme, setTheme] = useState<ThemeChoice>('system');
 
   useEffect(() => {

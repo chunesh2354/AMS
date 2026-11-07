@@ -8,3 +8,7 @@ it('ties the error to the input', () => {
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(input).toHaveAccessibleDescription('Already in use');
 });
+it('keeps the label connected when given an explicit id', () => {
+  render(<TextField id="reason" label="Reason" />);
+  expect(screen.getByLabelText('Reason')).toHaveAttribute('id', 'reason');
+});

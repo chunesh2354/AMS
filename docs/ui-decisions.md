@@ -18,3 +18,11 @@ Choices made where the brief was ambiguous or could not be met as written. The c
 14. **Team bottom bar:** More opens a menu with Expenses, Leave and Profile, because the brief lists five tabs but six Team destinations plus Profile.
 15. **Mock view-as:** the avatar menu switches viewer, and `?as=P04` sets the starting viewer for screenshots. Nothing is persisted, including the theme choice.
 16. **Screen-reader names use visible text.** Controls build their name from their content rather than `aria-label` so the visible label is always part of the name (WCAG 2.5.3). Calendar days read "4 Nov 2026" for that reason, while displayed dates stay "04 Nov 2026".
+17. **New design system components** the screens needed, each with stories and tests: AttentionList, ListStateBlock, Stepper and QueueRail. AvailabilityBar, ApprovalRow and PreviewPane come from the brief's inventory.
+18. **`?demo=loading|empty|error|denied`** forces a list state on any built route, so section 12.3's "story or route for every state" is checkable.
+19. **Person tabs live in `?tab=`.** Section 9 lists one route for the profile and route paths must not change, so tabs persist in the URL as a param.
+20. **Rates tab:** absent for staff as the brief says. A PM sees the tab with RestrictedCell values, the calmer reading of "absent for staff viewers".
+21. **Project avatars show the code's number** ("01"), with the full code as the accessible name, because initials of "PRJ-01" are meaningless.
+22. **Below 1280 px, the approval preview opens in a sheet.** The 400 px pane does not fit beside the rail and list.
+23. **Delegate opens a sheet, not a popover,** because a picker and calendar need their own popovers.
+24. **Approving, returning and delegating only change the current view.** Nothing persists in this build, so a reload restores all 14 items.

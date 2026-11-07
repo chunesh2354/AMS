@@ -7,6 +7,10 @@ it('uses two-letter initials', () => {
   render(<Avatar name="Asha Rao" />);
   expect(screen.getByRole('img', { name: 'Asha Rao' })).toHaveTextContent('AR');
 });
+it('accepts explicit text for things that are not people', () => {
+  render(<AvatarGroup names={['PRJ-01']} text={(n) => n.slice(-2)} />);
+  expect(screen.getByRole('img', { name: 'PRJ-01' })).toHaveTextContent('01');
+});
 it('collapses extras into +n', () => {
   render(<AvatarGroup names={['A B', 'C D', 'E F', 'G H']} max={2} />);
   expect(screen.getByText('+2')).toBeInTheDocument();

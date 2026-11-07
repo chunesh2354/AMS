@@ -29,7 +29,7 @@ button.queue:hover:not(:disabled) { transform: translateY(-1px); }
 .queue__label { font: var(--text-body-sm); color: var(--ink-2); }
 
 /* KpiTile */
-.kpi { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); }
+.kpi { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); height: 100%; }
 .kpi__label { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); }
 .kpi__value { display: flex; align-items: baseline; gap: var(--s-1); min-height: 32px; }
 .kpi__num { font: var(--text-kpi); letter-spacing: var(--track-kpi); }
@@ -132,10 +132,15 @@ button.queue:hover:not(:disabled) { transform: translateY(-1px); }
 }
 .dt td { height: var(--row-comfortable); padding: 0 var(--s-3); border-bottom: 1px solid var(--line); }
 .dt--dense td { height: var(--row-dense); }
-.dt tbody tr:nth-child(even):not(.dt__group) td { background: var(--surface-muted); }
-.dt__row:hover td { background: var(--surface-raised) !important; box-shadow: inset 0 1px 0 var(--line-strong), inset 0 -1px 0 var(--line-strong); }
+.dt tbody th {
+  position: static; z-index: auto; height: var(--row-comfortable); padding: 0 var(--s-3); background: transparent; white-space: normal;
+  font: var(--text-body-sm); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink-1); border-bottom: 1px solid var(--line);
+}
+.dt--dense tbody th { height: var(--row-dense); }
+.dt tbody tr:nth-child(even):not(.dt__group) > * { background: var(--surface-muted); }
+.dt__row:hover > * { background: var(--surface-raised) !important; box-shadow: inset 0 1px 0 var(--line-strong), inset 0 -1px 0 var(--line-strong); }
 .dt__row--click { cursor: pointer; }
-.dt__row[aria-selected='true'] td, .dt__row[aria-selected='true']:hover td { background: var(--accent-soft) !important; }
+.dt__row[aria-selected='true'] > *, .dt__row[aria-selected='true']:hover > * { background: var(--accent-soft) !important; }
 .dt__num { text-align: right !important; font: var(--text-numeric); white-space: nowrap; }
 .dt th.dt__num { font: var(--text-label); }
 .dt__sort { display: inline-flex; align-items: center; gap: var(--s-1); text-transform: inherit; letter-spacing: inherit; font: inherit; color: inherit; border-radius: var(--radius-sm); }

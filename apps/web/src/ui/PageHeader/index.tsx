@@ -3,13 +3,16 @@ import { Link, NavLink } from 'react-router-dom';
 import { cx } from '../cx';
 
 export type Crumb = { label: string; to?: string };
-export type PageTab = { label: string; to: string; end?: boolean };
+/** Route tabs use NavLink. Tabs held in a URL param pass `active` because the path does not change. */
+export type PageTab = { label: string; to: string; end?: boolean; active?: boolean };
 
 export type PageHeaderProps = {
   title: string;
   /** Display size is for Overview greetings and dashboards. */
   display?: boolean;
   breadcrumb?: Crumb[];
+  lead?: ReactNode;
+  subtitle?: ReactNode;
   meta?: ReactNode;
   primaryAction?: ReactNode;
   secondaryActions?: ReactNode;
@@ -18,7 +21,7 @@ export type PageHeaderProps = {
 };
 
 /** Sticky under the top bar. Becomes a glass bar once stuck, and hides its meta row. */
-export function PageHeader({ title, display, breadcrumb, meta, primaryAction, secondaryActions, period, tabs }: PageHeaderProps) {
+export function PageHeader({ title, display, breadcrumb, lead, subtitle, meta, primaryAction, secondaryActions, period, tabs }: PageHeaderProps) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
@@ -40,14 +43,22 @@ export function PageHeader({ title, display, breadcrumb, meta, primaryAction, se
         )}
         <div className="pagehead__row">
           <div style={{ minWidth: 0 }}>
-            <h1 className={display ? 't-display' : 't-h1'}>{title}</h1>
+            <div className="person-head">
+              {lead}
+              <div>
+                <h1 className={display ? 't-display' : 't-h1'}>{title}</h1>
+                {subtitle && <p className="t-body-sm ink-2">{subtitle}</p>}
+              </div>
+            </div>
             {meta && <div className="pagehead__meta">{meta}</div>}
           </div>
           {(period || secondaryActions || primaryAction) && <div className="pagehead__actions">{period}{secondaryActions}{primaryAction}</div>}
         </div>
         {tabs && (
           <nav className="pagehead__tabs" aria-label={`${title} sections`}>
-            {tabs.map((t) => <NavLink key={t.to} to={t.to} end={t.end} className="pagehead__tab">{t.label}</NavLink>)}
+            {tabs.map((t) => t.active === undefined
+              ? <NavLink key={t.to} to={t.to} end={t.end} className="pagehead__tab">{t.label}</NavLink>
+              : <Link key={t.to} to={t.to} className={cx('pagehead__tab', t.active && 'active')} aria-current={t.active ? 'page' : undefined}>{t.label}</Link>)}
           </nav>
         )}
       </div>

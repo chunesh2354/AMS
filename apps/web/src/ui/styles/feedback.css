@@ -61,7 +61,7 @@
 .avatar--36 { width: 36px; height: 36px; font: 500 13px/1 var(--font-sans); }
 .avatar-group { display: inline-flex; align-items: center; }
 .avatar-group > * { background: var(--surface); border-radius: 50%; }
-.avatar-group > * + * { margin-left: -6px; }
+.avatar-group > * + * { margin-left: -4px; }
 .avatar-group .avatar { box-shadow: 0 0 0 2px var(--surface); background: var(--surface-muted); }
 
 /* State blocks */

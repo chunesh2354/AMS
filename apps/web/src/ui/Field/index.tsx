@@ -15,8 +15,9 @@ export type FieldBaseProps = {
 export type FieldRenderProps = { id: string; 'aria-describedby'?: string; 'aria-invalid'?: true };
 
 /** Shared label, helper, error and affix shell for every form field. */
-export function Field({ label, helper, error, prefix, suffix, dense, disabled, readOnly, children }: FieldBaseProps & { children: (p: FieldRenderProps) => ReactNode }) {
-  const id = useId();
+export function Field({ label, helper, error, prefix, suffix, dense, disabled, readOnly, id: idProp, children }: FieldBaseProps & { id?: string; children: (p: FieldRenderProps) => ReactNode }) {
+  const auto = useId();
+  const id = idProp ?? auto;
   const noteId = `${id}-note`;
   const note = error ?? helper;
   return (

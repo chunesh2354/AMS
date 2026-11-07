@@ -7,23 +7,13 @@ import { CommandPalette, useCommandShortcut, type PaletteAction } from '../ui/Co
 import { InlineAlert } from '../ui/InlineAlert';
 import { SideNav } from '../ui/SideNav';
 import { TimerPill } from '../ui/TimerPill';
-import { TopBar, type NotificationGroup } from '../ui/TopBar';
+import { TopBar } from '../ui/TopBar';
 import { useMediaQuery } from '../ui/useMediaQuery';
 import type { MenuItem } from '../ui/Menu';
 import { FIRM_NAV, TEAM_NAV, firmTabs, teamTabs } from '../app/nav';
 import { VIEWERS, canUseFirm, useSession } from '../app/session';
-
-const NOTIFICATIONS: NotificationGroup[] = [
-  { label: 'Today', items: [
-    { id: 'n1', text: 'INV-DEMO-0007 is 40 days overdue', time: '09:00', unread: true },
-    { id: 'n2', text: 'Working drawings is forecast 30 h over budget', time: '14:30', unread: true },
-    { id: 'n3', text: 'Billing draft for PRJ-02 was approved', time: '11:20', unread: true },
-  ] },
-  { label: 'Earlier', items: [
-    { id: 'n4', text: 'Divya Menon has a 2 h conflict in the week of 16 Nov', time: '05 Nov 2026' },
-    { id: 'n5', text: 'Vikram Nair returned a timesheet line from Arjun Das', time: '05 Nov 2026' },
-  ] },
-];
+import { getNotifications } from '../api';
+import { FIRM_NAME } from '../mock/studio-meridian';
 
 const isMac = /mac/i.test(navigator.platform);
 const iconProps = { size: 16, strokeWidth: 1.5, 'aria-hidden': true } as const;
@@ -34,7 +24,7 @@ export function ShellLayout({ iface }: { iface: 'firm' | 'team' }) {
   const { viewer, setViewer, theme, setTheme } = useSession();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [collapsedByUser, setCollapsedByUser] = useState(false);
-  const [notifications, setNotifications] = useState(NOTIFICATIONS);
+  const [notifications, setNotifications] = useState(getNotifications);
   const [timerRunning, setTimerRunning] = useState(viewer.id === 'P04');
   const [elapsed, setElapsed] = useState(6120);
 
@@ -60,7 +50,7 @@ export function ShellLayout({ iface }: { iface: 'firm' | 'team' }) {
       { id: 'leave', label: 'Request leave', group: 'Actions', onSelect: go('/me/leave') },
       ...navItems.map((n) => ({ id: n.to, label: n.label, group: 'Navigate', meta: n.badge ? `${n.badge} pending` : undefined, onSelect: go(n.to) })),
       ...(firmAllowed ? [
-        { id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/people') },
+        { id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/people?add=1') },
         { id: 'new-project', label: 'Create project', group: 'Create', onSelect: go('/firm/projects') },
         { id: 'p2', label: 'Vikram Nair', group: 'People', meta: 'Project architect', onSelect: go('/firm/people/P02') },
         { id: 'p5', label: 'Divya Menon', group: 'People', meta: 'Architect', onSelect: go('/firm/people/P05') },
@@ -92,7 +82,7 @@ export function ShellLayout({ iface }: { iface: 'firm' | 'team' }) {
         interface={iface}
         sideNav={
           <SideNav
-            brand="Studio Meridian (DEMO)"
+            brand={FIRM_NAME}
             sections={showFirmNav ? FIRM_NAV : TEAM_NAV}
             collapsed={collapsed}
             onToggleCollapsed={narrow ? undefined : () => setCollapsedByUser((c) => !c)}
