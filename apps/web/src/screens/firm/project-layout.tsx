@@ -2,6 +2,8 @@ import { Outlet, useParams } from 'react-router-dom';
 import { useOverlays } from '../../app/overlays';
 import { getProject } from '../../api';
 import { useResource } from '../../api/useResource';
+import { isLive } from '../../api/live';
+import { getLiveProject } from '../../api/live/projects';
 import { useSession } from '../../app/session';
 import { Button } from '../../ui/Button';
 import { EmptyState } from '../../ui/EmptyState';
@@ -15,7 +17,7 @@ export function ProjectLayout() {
   const { id = '' } = useParams();
   const { openLogTime } = useOverlays();
   const { viewer } = useSession();
-  const { state, data: p } = useResource(() => getProject(id, viewer), [id, viewer.id]);
+  const { state, data: p } = useResource(() => (isLive ? getLiveProject(id) : getProject(id, viewer)), [id, viewer.id]);
   const base = `/firm/projects/${id}`;
   if (state === 'ready' && !p) {
     return (

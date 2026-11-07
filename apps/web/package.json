@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:live": "vite --mode live",
     "build": "tsc --noEmit && vite build",
+    "build:live": "vite build --mode live --outDir dist-live",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && node scripts/check-colors.mjs",

@@ -4,6 +4,8 @@ import { FolderKanban } from 'lucide-react';
 import { getPeople, getProjects, personName, type ProjectView } from '../../api';
 import { CreateProjectSheet } from './create-project-sheet';
 import { useResource } from '../../api/useResource';
+import { isLive } from '../../api/live';
+import { getLiveProjects } from '../../api/live/projects';
 import { useSession } from '../../app/session';
 import { Avatar } from '../../ui/Avatar';
 import { BudgetBar } from '../../ui/BudgetBar';
@@ -23,7 +25,7 @@ export function ProjectsScreen() {
   const [params] = useSearchParams();
   const [creating, setCreating] = useState(params.get('new') === '1');
   const people = useResource(getPeople, []);
-  const { state, data, retry } = useResource(() => getProjects(viewer), [viewer.id]);
+  const { state, data, retry } = useResource(() => (isLive ? getLiveProjects() : getProjects(viewer)), [viewer.id]);
   const projects = useMemo(() => data ?? [], [data]);
 
   const filters: FilterDef[] = useMemo(() => [

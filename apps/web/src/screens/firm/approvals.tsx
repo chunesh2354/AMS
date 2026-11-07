@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getApprovals, getPeople, type Approval, type ApprovalType } from '../../api';
 import { useResource } from '../../api/useResource';
+import { failureMessage, isLive } from '../../api/live';
+import { approveOne, batchApprove, batchMessage, delegateOne, liveApprovals, liveDelegates, returnOne, type DelegateOption } from '../../api/live/approvals';
 import { ApprovalRow } from '../../ui/ApprovalRow';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox';
@@ -18,6 +20,9 @@ import { useToast } from '../../ui/Toast';
 import { useMediaQuery } from '../../ui/useMediaQuery';
 import { GoTo } from '../shared/go-to';
 
+const loadDelegates = async (): Promise<DelegateOption[]> =>
+  isLive ? liveDelegates() : (await getPeople()).filter((p) => !p.roles.every((r) => r === 'staff')).map((p) => ({ id: p.id, name: p.name, title: p.title }));
+
 const QUEUES: ('All' | ApprovalType)[] = ['All', 'Time', 'Leave', 'Expenses', 'Bills', 'Changes', 'Billing drafts'];
 
 function Preview({ item, onApprove, onDelegate }: { item: Approval | null; onApprove: (a: Approval) => void; onDelegate: (a: Approval) => void }) {
@@ -33,7 +38,7 @@ function Preview({ item, onApprove, onDelegate }: { item: Approval | null; onApp
         { label: 'Approver', value: item.approver },
         { label: 'Waiting', value: `${item.ageDays} d`, mono: true },
       ]}
-      alert={item.exception && <InlineAlert variant="warn" title={`Exception: ${item.exception.toLowerCase()}`}>Thursday has 12.50 h. This item needs its own decision and stays out of batch approval.</InlineAlert>}
+      alert={item.exception && <InlineAlert variant="warn" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}This item needs its own decision and stays out of batch approval.</InlineAlert>}
       evidence={item.evidence}
       history={item.history}
       actions={<><Button variant="primary" onClick={() => onApprove(item)}>Approve</Button><Button onClick={() => onDelegate(item)}>Delegate</Button></>}
@@ -43,8 +48,8 @@ function Preview({ item, onApprove, onDelegate }: { item: Approval | null; onApp
 
 export function ApprovalsScreen() {
   const [params, setParams] = useSearchParams();
-  const { state, data, retry } = useResource(getApprovals, []);
-  const people = useResource(getPeople, []);
+  const { state, data, retry } = useResource(isLive ? liveApprovals : getApprovals, []);
+  const people = useResource(loadDelegates, []);
   const toast = useToast();
   const wide = useMediaQuery('(min-width: 1280px)');
   const [done, setDone] = useState<string[]>([]);
@@ -65,8 +70,28 @@ export function ApprovalsScreen() {
   const active = shown.find((a) => a.id === activeId) ?? (wide ? shown[0] ?? null : null);
 
   const clear = (ids: string[]) => { setDone((d) => [...d, ...ids]); setSelected((s) => s.filter((x) => !ids.includes(x))); };
-  const approve = (a: Approval) => { clear([a.id]); setSheetPreview(false); toast({ variant: 'success', message: `Approved ${a.submitter}, ${a.type.toLowerCase()}.` }); };
+  const fail = (e: unknown) => toast({ variant: 'danger', message: failureMessage(e) });
+  const reload = () => { setSelected([]); retry(); };
+  const approve = (a: Approval) => {
+    setSheetPreview(false);
+    if (isLive) {
+      approveOne(a.id).then(() => toast({ variant: 'success', message: `Approved ${a.submitter}, ${a.type.toLowerCase()}.` }), fail).finally(reload);
+      return;
+    }
+    clear([a.id]); toast({ variant: 'success', message: `Approved ${a.submitter}, ${a.type.toLowerCase()}.` });
+  };
+  const returnItem = (a: Approval, reason: string) => {
+    if (isLive) {
+      returnOne(a.id, reason).then(() => toast({ variant: 'warn', message: `Returned to ${a.submitter}: ${reason}` }), fail).finally(reload);
+      return;
+    }
+    clear([a.id]); toast({ variant: 'warn', message: `Returned to ${a.submitter}: ${reason}` });
+  };
   const batch = () => {
+    if (isLive) {
+      batchApprove(picked).then((r) => toast({ variant: r.skipped.length ? 'warn' : 'success', message: batchMessage(r) }), fail).finally(reload);
+      return;
+    }
     clear(picked);
     toast({ variant: 'success', message: `${picked.length} approved.${exceptions ? ` ${exceptions} exception${exceptions > 1 ? 's' : ''} excluded.` : ''}` });
   };
@@ -74,6 +99,16 @@ export function ApprovalsScreen() {
   const saveDelegate = () => {
     if (!delegate || !range.from || !range.to) { setDelegateTried(true); return; }
     const name = people.data?.find((p) => p.id === delegate)?.name;
+    if (isLive) {
+      const item = delegating;
+      if (!item) return;
+      delegateOne(item.id, delegate, range.to).then(() => {
+        toast({ variant: 'info', message: `${item.submitter}, ${item.type.toLowerCase()} delegated to ${name}.` });
+        setDelegating(null);
+        reload();
+      }, fail);
+      return;
+    }
     toast({ variant: 'info', message: `${delegating?.submitter}, ${delegating?.type.toLowerCase()} delegated to ${name}.` });
     if (delegating) clear([delegating.id]);
     setDelegating(null);
@@ -120,7 +155,7 @@ export function ApprovalsScreen() {
                     onSelect={(on) => setSelected((s) => (on ? [...s, a.id] : s.filter((x) => x !== a.id)))}
                     onOpen={() => { setActiveId(a.id); if (!wide) setSheetPreview(true); }}
                     onApprove={() => approve(a)}
-                    onReturn={(reason) => { clear([a.id]); toast({ variant: 'warn', message: `Returned to ${a.submitter}: ${reason}` }); }}
+                    onReturn={(reason) => returnItem(a, reason)}
                     onDelegate={() => startDelegate(a)}
                   />
                 ))}
@@ -143,7 +178,7 @@ export function ApprovalsScreen() {
           <FormSection>
             <PersonPicker
               label="Delegate to" value={delegate} onChange={setDelegate}
-              people={(people.data ?? []).filter((p) => !p.roles.every((r) => r === 'staff')).map((p) => ({ id: p.id, name: p.name, title: p.title }))}
+              people={people.data ?? []}
               error={delegateTried && !delegate ? 'Choose a person' : undefined}
             />
             <DateRangeField label="Dates" value={range} onChange={setRange} today="2026-11-06" min="2026-11-06" error={delegateTried && (!range.from || !range.to) ? 'Choose a start and end date' : undefined} />

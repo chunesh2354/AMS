@@ -1,4 +1,8 @@
 import { useState } from 'react';
+import { createDraft } from '../../api/live/billing';
+import { failureMessage } from '../../api/live';
+import { Select } from '../../ui/Select';
+import { InlineAlert } from '../../ui/InlineAlert';
 import { type Person, type ReadyItem } from '../../api';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox';
@@ -70,6 +74,42 @@ export function GenerateDraftSheet({ open, onClose, items, excess, people }: { o
             <PersonPicker label="Approver" people={people.filter((p) => p.roles.includes('principal')).map((p) => ({ id: p.id, name: p.name, title: p.title }))} value={approver} onChange={setApprover} />
           </FormSection>
         )}
+      </Form>
+    </Sheet>
+  );
+}
+
+/** Live mode: pick a project with ready lines, POST /billing/drafts. One Idempotency-Key per opening. */
+export function LiveGenerateDraftSheet({ open, onClose, items, onCreated }: { open: boolean; onClose: () => void; items: ReadyItem[]; onCreated: (draftNo: string) => void }) {
+  const toast = useToast();
+  const [project, setProject] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [key, setKey] = useState('');
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open && !wasOpen) { setWasOpen(true); setProject(null); setTried(false); setError(null); setKey(crypto.randomUUID()); }
+  if (!open && wasOpen) setWasOpen(false);
+  const projects = [...new Map(items.map((i) => [i.project, `${i.project} ${i.projectName}`])).entries()].map(([value, label]) => ({ value, label }));
+  const submit = async () => {
+    if (!project) { setTried(true); return; }
+    setBusy(true); setError(null);
+    try {
+      const d = await createDraft(project, key);
+      toast({ variant: 'success', message: `${d.draft_no} created for ${project}.` });
+      onCreated(d.draft_no); onClose();
+    } catch (e) { setError(failureMessage(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Sheet
+      open={open} onClose={onClose} title="Generate billing draft"
+      footer={(<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy} onClick={submit}>Create draft</Button></>)}
+    >
+      <Form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <FormSection title="Project">
+          <Select label="Project" options={projects} value={project} onChange={setProject} placeholder={projects.length ? 'Choose a project' : 'No project has lines ready'} error={tried && !project ? 'Choose a project' : undefined} />
+        </FormSection>
+        {error && <InlineAlert variant="danger" title="The draft was not created">{error}</InlineAlert>}
       </Form>
     </Sheet>
   );

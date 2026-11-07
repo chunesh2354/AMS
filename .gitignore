@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-live/
 storybook-static/
 test-results/
 playwright-report/
@@ -8,3 +9,7 @@ playwright-report/
 .vite/
 coverage/
 .claude/
+apps/api/.pgdata/
+apps/api/.pgtest/
+exports/
+.env

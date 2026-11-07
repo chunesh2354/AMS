@@ -33,6 +33,7 @@ import { MyScheduleScreen } from './screens/me/schedule';
 import { MyTimeScreen } from './screens/me/time';
 import { MyWorkScreen } from './screens/me/work';
 import { ProjectsScreen } from './screens/firm/projects';
+import { LoginScreen } from './screens/auth/login';
 
 function FirmGuard() {
   const { viewer } = useSession();
@@ -48,6 +49,7 @@ function FirmGuard() {
 /** Route paths come from section 9 of the brief and must not change. */
 export const routes: RouteObject[] = [
   { path: '/', element: <Navigate to="/firm/overview" replace /> },
+  { path: '/login', element: <LoginScreen /> },
   {
     path: '/firm',
     element: <ShellLayout iface="firm" />,

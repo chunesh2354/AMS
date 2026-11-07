@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getInvoices, hasFinanceAccess, outstanding, personName, type Invoice } from '../../api';
+import { ApiFailure, failureMessage, isLive } from '../../api/live';
+import { amountErrorOf, getLiveReceivables, recordSettlement, type AgeingBuckets, type LiveInvoice, type SettlementKind } from '../../api/live/receivables';
 import { useResource } from '../../api/useResource';
-import { useSession } from '../../app/session';
+import { can, useSession } from '../../app/session';
 import { TODAY } from '../../mock/studio-meridian';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
@@ -26,6 +28,15 @@ import { GoTo } from '../shared/go-to';
 
 type Kind = 'Cash' | 'Withholding' | 'Credit';
 const FIELD: Record<Kind, 'cash' | 'withholding' | 'credits'> = { Cash: 'cash', Withholding: 'withholding', Credit: 'credits' };
+const API_KIND: Record<Kind, SettlementKind> = { Cash: 'cash', Withholding: 'withholding', Credit: 'credit_applied' };
+const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+function liveAgeing(a: AgeingBuckets): BarSegment[] {
+  const seg = (label: string, value: number, color: BarSegment['color']): BarSegment => ({ label, value, color, display: formatINR(value) });
+  return [seg('Current', a.current, 'ok'), seg('30 d', a.d30, 'warn'), seg('60 d', a.d60, 'danger'), seg('90+ d', a.d90, 'neutral')];
+}
+
+type SaveInput = { id: string; kind: Kind; amount: number; date: string; reference: string; key: string };
 
 function ageing(rows: Invoice[]): BarSegment[] {
   const open = rows.filter((i) => outstanding(i) > 0);
@@ -34,7 +45,7 @@ function ageing(rows: Invoice[]): BarSegment[] {
   return [seg('Current', sum((d) => d < 30), 'ok'), seg('30 d', sum((d) => d >= 30 && d < 60), 'warn'), seg('60 d', sum((d) => d >= 60 && d < 90), 'danger'), seg('90+ d', sum((d) => d >= 90), 'neutral')];
 }
 
-function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: boolean; invoice: Invoice | null; invoices: Invoice[]; onClose: () => void; onSave: (id: string, kind: Kind, amount: number) => void }) {
+function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: boolean; invoice: Invoice | null; invoices: Invoice[]; onClose: () => void; onSave: (input: SaveInput) => void | Promise<string | null> }) {
   const [id, setId] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>('Cash');
   const [amount, setAmount] = useState<number | null>(null);
@@ -42,8 +53,11 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
   const [reference, setReference] = useState('');
   const [tried, setTried] = useState(false);
   const [wasOpen, setWasOpen] = useState(false);
+  const [key, setKey] = useState('');
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const openOnes = invoices.filter((i) => outstanding(i) > 0);
-  if (open && !wasOpen) { setWasOpen(true); setId(invoice?.id ?? openOnes[0]?.id ?? null); setKind('Cash'); setAmount(null); setDate(TODAY); setReference(''); setTried(false); }
+  if (open && !wasOpen) { setWasOpen(true); setId(invoice?.id ?? openOnes[0]?.id ?? null); setKind('Cash'); setAmount(null); setDate(TODAY); setReference(''); setTried(false); setKey(newKey()); setServerError(null); setBusy(false); }
   if (!open && wasOpen) setWasOpen(false);
   const current = invoices.find((i) => i.id === id);
   const left = current ? outstanding(current) : 0;
@@ -51,18 +65,23 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
   const amountError = !amount ? 'Enter an amount' : amount > left ? `This is more than the ${formatINR(left)} outstanding` : undefined;
   const save = () => {
     if (!current || amountError) { setTried(true); return; }
-    onSave(current.id, kind, amount!);
+    if (busy) return;
+    const result = onSave({ id: current.id, kind, amount: amount!, date: date ?? TODAY, reference, key });
+    if (result instanceof Promise) {
+      setBusy(true);
+      void result.then((err) => { setBusy(false); setServerError(err); });
+    }
   };
   return (
     <Sheet
       open={open} onClose={onClose} title="Record settlement" description={current ? <>{current.id} · Outstanding <span className="t-numeric">{formatINR(left)}</span></> : undefined} dirty={amount != null}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save}>Save settlement</Button></>}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} disabled={busy}>Save settlement</Button></>}
     >
       <Form onSubmit={(e) => { e.preventDefault(); save(); }}>
         <FormSection>
           <Select label="Invoice" options={openOnes.map((i) => ({ value: i.id, label: `${i.id}, ${i.client}` }))} value={id} onChange={setId} />
           <div className="field"><span className="field__label">Type</span><Segmented<Kind> label="Settlement type" value={kind} onChange={setKind} options={(['Cash', 'Withholding', 'Credit'] as Kind[]).map((k) => ({ value: k, label: k }))} /></div>
-          <MoneyField label={`${kind} amount`} value={amount} onChange={setAmount} error={tried ? amountError : undefined} />
+          <MoneyField label={`${kind} amount`} value={amount} onChange={(v) => { setAmount(v); setServerError(null); }} error={(tried ? amountError : undefined) ?? serverError ?? undefined} />
           <DateField label="Date" value={date} onChange={setDate} today={TODAY} />
           <TextField label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} />
           <dl className="calc"><dt>Remaining after this</dt><dd className={remaining < 0 ? 'calc__danger' : 'calc__strong'}>{formatINR(remaining)}</dd></dl>
@@ -72,15 +91,25 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
   );
 }
 
+const ownerOf = (i: Invoice) => (i as LiveInvoice).ownerName ?? personName(i.ownerId);
+
 export function ReceivablesScreen() {
   const { viewer } = useSession();
   const [params] = useSearchParams();
   const toast = useToast();
-  const { state, data, retry } = useResource(getInvoices, []);
+  const [denied, setDenied] = useState(false);
+  const { state, data, retry } = useResource<{ invoices: Invoice[]; ageing: AgeingBuckets | null }>(
+    isLive
+      ? () => getLiveReceivables().catch((e: unknown) => { if (e instanceof ApiFailure && e.status === 403) setDenied(true); throw e; })
+      : () => getInvoices().then((invoices) => ({ invoices, ageing: null })),
+    [],
+  );
   const [edits, setEdits] = useState<Record<string, Invoice>>({});
   const [sheet, setSheet] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
-  const all = useMemo(() => (data ?? []).map((i) => edits[i.id] ?? i), [data, edits]);
-  if (!hasFinanceAccess(viewer)) return (<><PageHeader title="Receivables" /><div className="solid-panel"><PermissionDenied capability="finance" /></div></>);
+  const all = useMemo(() => (data?.invoices ?? []).map((i) => edits[i.id] ?? i), [data, edits]);
+  const allowed = isLive ? can(viewer, 'receivables.manage') && !denied : hasFinanceAccess(viewer);
+  const canRecord = isLive ? can(viewer, 'receivables.manage', { firmWide: true }) : true;
+  if (!allowed) return (<><PageHeader title="Receivables" /><div className="solid-panel"><PermissionDenied capability="finance" /></div></>);
   const rows = all.filter((i) => (!params.get('client') || i.client === params.get('client')) && (!params.get('state') || (params.get('state') === 'open') === (outstanding(i) > 0)));
   const filters: FilterDef[] = [
     { type: 'select', key: 'client', label: 'Client', options: [...new Set(all.map((i) => i.client))].map((c) => ({ value: c, label: c })) },
@@ -104,7 +133,7 @@ export function ReceivablesScreen() {
     {
       key: 'follow', header: 'Follow-up', value: (i) => i.followUp,
       render: (i) => (i.followUp
-        ? <span className="stacked"><span className="dt__person"><Avatar name={personName(i.ownerId)} size={20} />{personName(i.ownerId)}</span><span className="t-numeric ink-2">{formatDate(i.followUp)}</span></span>
+        ? <span className="stacked"><span className="dt__person"><Avatar name={ownerOf(i)} size={20} />{ownerOf(i)}</span><span className="t-numeric ink-2">{formatDate(i.followUp)}</span></span>
         : <span className="ink-2">None</span>),
     },
   ];
@@ -113,14 +142,14 @@ export function ReceivablesScreen() {
       <PageHeader
         title="Receivables"
         meta={state === 'ready' && <span className="t-numeric ink-2">{open.length} {open.length === 1 ? 'invoice' : 'invoices'} outstanding</span>}
-        primaryAction={<Button variant="primary" disabled={!open.length} onClick={() => setSheet({ open: true, invoice: null })}>Record settlement</Button>}
+        primaryAction={canRecord ? <Button variant="primary" disabled={!open.length} onClick={() => setSheet({ open: true, invoice: null })}>Record settlement</Button> : undefined}
       />
       {state === 'loading'
         ? <Skeleton kind="card" />
         : state === 'ready' && (
           <section className="card glass" aria-labelledby="ageing-head">
             <div className="panel__head"><h2 id="ageing-head" className="t-h2">Ageing</h2><span className="t-numeric">{formatINR(open.reduce((s, i) => s + outstanding(i), 0))}</span></div>
-            <SegmentedBar label="Receivables ageing" segments={ageing(all)} />
+            <SegmentedBar label="Receivables ageing" segments={data?.ageing ? liveAgeing(data.ageing) : ageing(all)} />
           </section>
         )}
       <FilterBar filters={filters} />
@@ -130,7 +159,24 @@ export function ReceivablesScreen() {
       />
       <SettlementSheet
         open={sheet.open} invoice={sheet.invoice} invoices={all} onClose={() => setSheet({ open: false, invoice: null })}
-        onSave={(id, kind, amount) => {
+        onSave={({ id, kind, amount, date, reference, key }) => {
+          if (isLive) {
+            const target = all.find((x) => x.id === id) as LiveInvoice | undefined;
+            if (!target) return Promise.resolve('Choose an invoice');
+            return recordSettlement(target.uuid, { kind: API_KIND[kind], amount, date, reference }, key).then(
+              () => {
+                setSheet({ open: false, invoice: null });
+                toast({ variant: 'success', message: `${kind} of ${formatINR(amount)} recorded on ${id}.` });
+                retry();
+                return null;
+              },
+              (e: unknown) => {
+                const inline = amountErrorOf(e);
+                if (!inline) toast({ variant: 'danger', message: failureMessage(e) });
+                return inline;
+              },
+            );
+          }
           const i = all.find((x) => x.id === id)!;
           const f = FIELD[kind];
           setEdits((e) => ({ ...e, [id]: { ...i, [f]: i[f] + amount } }));
