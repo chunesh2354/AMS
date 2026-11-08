@@ -37,11 +37,11 @@ const dateTimeOf = (iso: string) => {
 /** /platform. A layout of its own, outside the firm shell: no firm nav, no firm data, counts only. */
 export function PlatformCompaniesScreen() {
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg-plane)' }}>
+    <div className="scr-platform">
       {isLive ? <LivePanel /> : (
         <>
           <PlatformBar admin={null} />
-          <main style={{ padding: 'var(--s-6) var(--s-4)', maxWidth: 1200, margin: '0 auto' }}>
+          <main className="plat-main">
             <PageHeader title="Companies" />
             <EmptyState message="Start the API to use the platform panel." />
           </main>
@@ -60,13 +60,13 @@ function PlatformBar({ admin }: { admin: PlatformAdmin | null }) {
     try { await platformLogout(); } catch (e) { setFailure(failureMessage(e)); setBusy(false); }
   };
   return (
-    <header className="glass glass--bar" style={{ position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 'var(--s-4)', padding: 'var(--s-3) var(--s-4)', flexWrap: 'wrap' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s-2)' }}>
-        <span className="sidenav__mark" aria-hidden />
-        <strong className="t-h3">{PRODUCT_NAME}</strong>
+    <header className="plat-bar">
+      <span className="plat-bar__brand">
+        <span className="plat-bar__mark" aria-hidden />
+        <strong className="plat-bar__name">{PRODUCT_NAME}</strong>
       </span>
       <span className="ink-2 t-body-sm">Platform admin</span>
-      <span style={{ flex: 1 }} />
+      <span className="plat-bar__spacer" />
       {failure && <span role="alert" className="t-body-sm">{failure}</span>}
       {admin && <span className="t-body-sm">{admin.name}</span>}
       {admin && <Button size="dense" variant="ghost" loading={busy} onClick={signOut}>Sign out</Button>}
@@ -155,19 +155,24 @@ function LivePanel() {
   return (
     <>
       <PlatformBar admin={admin} />
-      <main style={{ padding: 'var(--s-6) var(--s-4)', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--s-6)' }}>
+      <main className="plat-main">
         <PageHeader
           title="Companies"
-          meta={loaded ? <span className="t-body-sm">{counts.total} {counts.total === 1 ? 'company' : 'companies'}</span> : undefined}
+          meta={loaded ? <span className="t-body ink-2">{counts.total} {counts.total === 1 ? 'company' : 'companies'}</span> : undefined}
           primaryAction={<Button variant="primary" icon={<Plus size={16} strokeWidth={1.5} aria-hidden />} onClick={() => setAdding(true)}>Add company</Button>}
         />
         {notice && <InlineAlert variant="success" title={notice} dismissible />}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--s-4)' }}>
+        <section className="plat-totals" aria-label="Totals">
           <KpiTile label="Companies" value={loaded ? formatGrouped(counts.total) : '—'} />
           <KpiTile label="Active" value={loaded ? formatGrouped(counts.active) : '—'} />
           <KpiTile label="Suspended" value={loaded ? formatGrouped(counts.suspended) : '—'} />
           <KpiTile label="People" value={loaded ? formatGrouped(counts.people) : '—'} />
-        </div>
+        </section>
+        <section className="plat-section" aria-labelledby="plat-studios-h">
+        <header className="plat-section__head">
+          <h2 id="plat-studios-h" className="t-h2">Studios</h2>
+          <span className="t-body-sm ink-2">Select a studio to see its details</span>
+        </header>
         <DataTable
           label="Companies"
           columns={columns}
@@ -183,8 +188,9 @@ function LivePanel() {
             ? [{ label: 'Suspend', danger: true, onSelect: () => setAction({ kind: 'suspend', firm: f }) }]
             : [{ label: 'Reactivate', onSelect: () => setAction({ kind: 'reactivate', firm: f }) }])}
         />
-        <section className="glass" style={{ padding: 'var(--s-6)', borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
-          <h2 className="t-h3">Activity</h2>
+        </section>
+        <section className="plat-section plat-section--narrow" aria-labelledby="plat-activity-h">
+          <h2 id="plat-activity-h" className="t-h2">Activity</h2>
           {auditState === 'ready'
             ? <ActivityFeed days={auditDays} />
             : <ListStateBlock state={auditState} label="Platform activity" empty={{ message: 'No platform activity yet.' }} errorMessage={auditError} onRetry={loadAudit} />}
@@ -320,7 +326,7 @@ function CompanySheet({ firm, onClose, onChanged, onStatus }: {
               <dt>Last login</dt><dd className={shown.last_login_at ? 't-numeric' : undefined}>{shown.last_login_at ? dateTimeOf(shown.last_login_at) : 'Never'}</dd>
             </dl>
             <section aria-label="Owner" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
-              <h3 className="t-label">Owner</h3>
+              <h3 className="t-h3">Owner</h3>
               <dl className="def-list">
                 <dt>Name</dt><dd>{shown.owner_name ?? 'Not set'}</dd>
                 <dt>Email</dt><dd>{shown.owner_email ?? 'Not set'}</dd>

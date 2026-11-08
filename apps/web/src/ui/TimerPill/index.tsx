@@ -12,7 +12,7 @@ export type TimerPillProps = {
   onStop?: () => void;
 };
 
-/** Idle offers Start. Running shows mono elapsed time; only the dot pulses, and it warns after 10 h. */
+/** Idle offers Start. Running shows a filled marker and tabular elapsed time, and turns redline after 10 h. */
 export function TimerPill({ state, elapsedSeconds = 0, context, onStart, onStop }: TimerPillProps) {
   if (state === 'idle') {
     return (

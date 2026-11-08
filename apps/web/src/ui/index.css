@@ -7,3 +7,5 @@
 @import './styles/shell.css';
 @import './styles/workflow.css';
 @import './styles/planning.css';
+/* Screen-level overrides for the approved redesign. Imported last so it wins over the component layers. */
+@import './styles/screens.css';

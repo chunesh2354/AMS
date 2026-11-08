@@ -1,15 +1,15 @@
 import { expect, test } from '@playwright/test';
 
-test('body resolves to Geist with tabular figures', async ({ page }) => {
+test('body resolves to Jost with tabular figures', async ({ page }) => {
   await page.goto('/firm/overview');
   const style = await page.evaluate(() => {
     const s = getComputedStyle(document.documentElement);
     return { family: getComputedStyle(document.body).fontFamily, features: s.fontFeatureSettings };
   });
-  expect(style.family).toContain('Geist Sans');
+  expect(style.family).toContain('Jost');
   expect(style.features).toContain('tnum');
   await page.evaluate(() => document.fonts.ready);
-  expect(await page.evaluate(() => document.fonts.check('14px "Geist Sans"'))).toBe(true);
+  expect(await page.evaluate(() => document.fonts.check('15px "Jost Variable"'))).toBe(true);
 });
 
 test('navigates through the real shell and keeps route paths', async ({ page }) => {
@@ -33,11 +33,12 @@ test('command palette is fully keyboard driven', async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test('theme toggle writes data-theme', async ({ page }) => {
+test('the app is light only and offers no theme toggle', async ({ page }) => {
   await page.goto('/firm/overview');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByRole('button', { name: /account menu/ }).click();
-  await page.getByRole('menuitem', { name: 'Dark' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('menuitem', { name: 'My profile' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^(System|Light|Dark)/ })).toHaveCount(0);
 });
 
 test('view as Rohan hides Firm navigation and fences the route', async ({ page }) => {
@@ -46,11 +47,11 @@ test('view as Rohan hides Firm navigation and fences the route', async ({ page }
   await expect(page.getByRole('link', { name: 'Billing' })).toHaveCount(0);
 });
 
-test('sidebar collapses to 64 px under 1280 and hides under 768', async ({ page }) => {
+test('sidebar is 232 px, collapses to 64 px under 1280 and hides under 768', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/firm/overview');
   const nav = page.getByRole('navigation', { name: 'Main' });
-  expect((await nav.boundingBox())?.width).toBe(248);
+  expect((await nav.boundingBox())?.width).toBe(232);
   await page.setViewportSize({ width: 1100, height: 900 });
   await expect.poll(async () => (await nav.boundingBox())?.width).toBe(64);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -81,11 +82,15 @@ test.describe('fallbacks', () => {
     expect(await nav.boundingBox()).toEqual(before);
   });
 
-  test('never exceeds 20 px blur', async ({ page }) => {
+  test('the shell has no glass: no blur on the navigation, top bar or palette', async ({ page }) => {
     await page.goto('/firm/overview');
-    const blur = await page.getByRole('navigation', { name: 'Main' }).evaluate((el) => getComputedStyle(el).backdropFilter);
-    const px = Number(blur.match(/blur\((\d+)px\)/)?.[1]);
-    expect(px).toBeLessThanOrEqual(20);
+    for (const el of [page.getByRole('navigation', { name: 'Main' }), page.locator('.topbar')]) {
+      expect(await el.evaluate((e) => getComputedStyle(e).backdropFilter)).toBe('none');
+      expect(await el.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 255, 255)');
+    }
+    await page.keyboard.press('Control+k');
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    expect(await palette.evaluate((e) => getComputedStyle(e).backdropFilter)).toBe('none');
   });
 });
 

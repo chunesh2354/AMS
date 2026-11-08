@@ -54,19 +54,19 @@ function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & {
         { label: 'Approver', value: item.approver },
         { label: 'Waiting', value: `${item.ageDays} d`, mono: true },
       ]}
-      alert={item.exception && <InlineAlert variant="warn" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}This item needs its own decision and stays out of batch approval.</InlineAlert>}
+      alert={item.exception && <InlineAlert variant="danger" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}It is left out of bulk approval. Approve it here or return it with a note.</InlineAlert>}
       evidence={item.evidence}
       history={item.history}
       actions={returning
         ? <div className="apr__return">
             <TextField
-              dense autoFocus label="Reason the submitter will see" value={reason} placeholder="What needs to change"
-              error={tried && !reason.trim() ? 'A reason is required' : undefined} onChange={(e) => setReason(e.target.value)}
+              dense autoFocus label={`Note to ${item.submitter}`} value={reason} placeholder="Say what to change before you approve"
+              error={tried && !reason.trim() ? 'Add a note before you send it back' : undefined} onChange={(e) => setReason(e.target.value)}
             />
-            <Button variant="primary" onClick={sendReturn}>Send return</Button>
+            <Button variant="primary" onClick={sendReturn}>Send back</Button>
             <Button variant="ghost" onClick={() => { setReturning(false); setTried(false); }}>Cancel</Button>
           </div>
-        : <><Button variant="primary" onClick={() => onApprove(item)}>Approve</Button><Button onClick={() => setReturning(true)}>Return</Button><Button variant="ghost" onClick={() => onDelegate(item)}>Delegate</Button></>}
+        : <><Button variant="primary" onClick={() => onApprove(item)}>Approve</Button><Button onClick={() => setReturning(true)}>Return with note</Button><Button variant="ghost" onClick={() => onDelegate(item)}>Delegate</Button></>}
     />
   );
 }
@@ -149,13 +149,17 @@ export function ApprovalsScreen() {
   };
 
   const effective = state === 'ready' && !shown.length ? 'empty' : state;
+  const oldest = open.reduce((m, a) => Math.max(m, a.ageDays), 0);
+  const context = !open.length
+    ? 'Nothing is waiting for you.'
+    : `${open.length} waiting for you. The oldest has waited ${oldest} ${oldest === 1 ? 'day' : 'days'}.`;
   const allOn = eligible.length > 0 && picked.length === eligible.length;
 
   return (
-    <>
+    <div className="scr-approvals">
       <PageHeader
         title="Approvals"
-        meta={<span className="t-numeric ink-2">{open.length} pending</span>}
+        meta={<span className="t-body ink-2">{state === 'ready' ? context : 'Loading what is waiting for you.'}</span>}
         primaryAction={<Button variant="primary" disabled={!picked.length} onClick={batch}>Approve {picked.length || ''} selected</Button>}
       />
       <div className="inbox">
@@ -169,7 +173,7 @@ export function ApprovalsScreen() {
             <section className="solid-panel" aria-label="Approval items">
               <div className="inbox__toolbar">
                 <Checkbox label={`Select all ${eligible.length} eligible`} checked={allOn} indeterminate={!allOn && picked.length > 0} onChange={(e) => setSelected(e.target.checked ? eligible.map((a) => a.id) : [])} />
-                {exceptions > 0 && <span className="t-caption ink-2">{exceptions} exception excluded from batch</span>}
+                {exceptions > 0 && <span className="apr-excluded t-body-sm"><span className="marker marker--alert" aria-hidden />{exceptions} {exceptions === 1 ? 'exception' : 'exceptions'} excluded</span>}
               </div>
               <ul className="inbox__list">
                 {shown.map((a) => (
@@ -210,6 +214,6 @@ export function ApprovalsScreen() {
           </FormSection>
         </Form>
       </Sheet>
-    </>
+    </div>
   );
 }

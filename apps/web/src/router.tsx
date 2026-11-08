@@ -33,7 +33,7 @@ import { MyScheduleScreen } from './screens/me/schedule';
 import { MyTimeScreen } from './screens/me/time';
 import { MyWorkScreen } from './screens/me/work';
 import { ProjectsScreen } from './screens/firm/projects';
-import { LoginScreen } from './screens/auth/login';
+import { LoginScreen, StudioLoginScreen, TeamLoginScreen } from './screens/auth/login';
 import { AcceptInviteScreen } from './screens/auth/accept-invite';
 import { PlatformLoginScreen } from './screens/platform/login';
 import { PlatformCompaniesScreen } from './screens/platform/companies';
@@ -53,6 +53,8 @@ function FirmGuard() {
 export const routes: RouteObject[] = [
   { path: '/', element: <Navigate to="/firm/overview" replace /> },
   { path: '/login', element: <LoginScreen /> },
+  { path: '/login/studio', element: <StudioLoginScreen /> },
+  { path: '/login/team', element: <TeamLoginScreen /> },
   { path: '/accept-invite/:token', element: <AcceptInviteScreen /> },
   { path: '/platform/login', element: <PlatformLoginScreen /> },
   { path: '/platform', element: <PlatformCompaniesScreen /> },

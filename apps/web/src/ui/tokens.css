@@ -1,148 +1,104 @@
 /* Sections 4-6 of docs/ui-brief.md. The only file allowed to contain colour literals.
-   Visual direction (Nov 2026): quiet, Apple-like restraint. Near-black ink on soft grey, one confident blue,
-   rich frosted glass over a faint colour wash, and Geist set with bold, tightly tracked headings. */
+   Visual direction (approved redesign, Nov 2026): a drawing-office sheet. White paper, black ink,
+   1px hairlines and black section rules, Jost throughout, and one redline accent kept for problems only.
+   No gradients, no glass, no blur; the only shadow belongs to floating layers (sheets, menus, popovers).
+   Light only for now: the dark selectors below resolve to the light values. */
 :root {
-  --font-sans: "Geist Sans", "Geist", system-ui, -apple-system, sans-serif;
+  --font-sans: "Jost Variable", "Jost", Futura, Helvetica, Arial, sans-serif;
+  /* Kept only for keyboard hints. Never for data. */
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --text-display: 700 34px/40px var(--font-sans);  --track-display: -0.035em;
-  --text-h1: 700 26px/32px var(--font-sans);       --track-h1: -0.03em;
-  --text-h2: 600 19px/26px var(--font-sans);       --track-h2: -0.02em;
-  --text-h3: 600 15px/20px var(--font-sans);
-  --text-body: 400 14px/21px var(--font-sans);
-  --text-body-sm: 400 13px/19px var(--font-sans);
-  --text-label: 500 12px/16px var(--font-sans);    --track-label: -0.003em;
-  --text-caption: 400 12px/16px var(--font-sans);
-  --text-numeric: 500 13px/18px var(--font-sans);
-  --text-kpi: 700 30px/34px var(--font-sans);      --track-kpi: -0.035em;
-  --text-timer: 600 15px/20px var(--font-sans);
+  --text-display: 500 40px/1.1 var(--font-sans);    --track-display: -0.02em;
+  --text-h1: 500 28px/1.15 var(--font-sans);        --track-h1: -0.015em;
+  --text-h2: 500 22px/1.25 var(--font-sans);        --track-h2: -0.01em;
+  --text-h3: 500 17px/24px var(--font-sans);
+  --text-body: 400 15px/1.55 var(--font-sans);
+  --text-body-sm: 400 14px/1.45 var(--font-sans);
+  --text-label: 500 13px/18px var(--font-sans);     --track-label: 0;
+  --text-caption: 400 13px/18px var(--font-sans);
+  --text-numeric: 400 15px/22px var(--font-sans);
+  --text-kpi: 300 52px/1.05 var(--font-sans);       --track-kpi: -0.02em;
+  --text-timer: 500 17px/24px var(--font-sans);
 
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
   --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
 
-  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 18px; --radius-xl: 24px; --radius-pill: 999px;
+  /* 2px on buttons, inputs and chips; panels are square. The pill stays for avatars and toggles only. */
+  --radius-sm: 2px; --radius-md: 2px; --radius-lg: 0; --radius-xl: 0; --radius-pill: 999px;
 
-  --h-control: 36px; --h-dense: 32px; --h-cta: 44px; --h-chip: 28px;
-  --row-comfortable: 44px; --row-dense: 34px; --row-header: 36px;
+  --h-control: 44px; --h-dense: 36px; --h-cta: 48px; --h-input: 48px; --h-chip: 28px;
+  --row-comfortable: 52px; --row-dense: 40px; --row-header: 40px;
 
   --sidebar: 248px; --sidebar-collapsed: 64px; --topbar: 56px;
-  --sheet-form: 480px; --sheet-detail: 640px; --sheet-footer: 64px;
-  --gutter: 40px; --content-max: 1440px;
+  --sheet-form: 480px; --sheet-detail: 640px; --sheet-footer: 72px;
+  --gutter: 48px; --content-max: 1440px;
 
   --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --dur-1: 160ms; --dur-2: 240ms; --dur-3: 320ms;
 
-  --glass-blur: blur(20px) saturate(180%);
+  /* Glass is retired: the token stays so older rules resolve, but it never blurs. */
+  --glass-blur: none;
 
-  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  /* 2px black ring 3px clear of the element, for places that draw focus with a shadow instead of an outline. */
+  --focus-ring: 0 0 0 3px var(--surface), 0 0 0 5px var(--rule);
 
   --restricted: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px);
-  --overrun-hatch: repeating-linear-gradient(45deg, var(--danger) 0 2px, var(--danger-soft) 2px 6px);
-  --unavailable-hatch: repeating-linear-gradient(45deg, var(--neutral-soft) 0 4px, transparent 4px 8px);
+  --overrun-hatch: repeating-linear-gradient(45deg, var(--redline) 0 2px, var(--danger-soft) 2px 6px);
+  --unavailable-hatch: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px);
 
-  /* Soft, layered shadows: a hairline contact shadow plus a wide ambient one. */
-  --shadow-glass: 0 1px 1px rgba(0,0,0,0.03), 0 2px 6px rgba(0,0,0,0.03), 0 18px 40px -18px rgba(0,0,0,0.14);
-  --shadow-glass-elevated: 0 2px 8px rgba(0,0,0,0.05), 0 32px 80px -20px rgba(0,0,0,0.30);
-  --shadow-btn: 0 1px 2px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.18);
-  --shadow-mark: inset 0 1px 0 rgba(255,255,255,0.35);
+  /* One soft shadow, for floating layers only. Everything else sits flat on the page. */
+  --shadow-glass: none;
+  --shadow-glass-elevated: 0 12px 40px -12px rgba(0,0,0,0.18);
+  --shadow-btn: none;
+  --shadow-mark: none;
 }
 
-@media (max-width: 1279px) { :root { --gutter: 28px; } }
+@media (max-width: 1279px) { :root { --gutter: 32px; } }
 @media (max-width: 1023px) { :root { --gutter: 16px; } }
 
 :root {
   color-scheme: light;
   /* LIGHT */
-  --bg-plane: linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 38%, #f2f2f5 100%);
-  --bg-plane-accent:
-    radial-gradient(900px 600px at 8% -8%, rgba(0,113,227,0.10), transparent 62%),
-    radial-gradient(800px 560px at 96% 4%, rgba(175,82,222,0.08), transparent 60%),
-    radial-gradient(900px 700px at 70% 112%, rgba(255,149,0,0.07), transparent 62%);
-  --glass-1: rgba(255,255,255,0.74);
-  --glass-2: rgba(255,255,255,0.86);
-  --glass-edge-in: rgba(255,255,255,0.95);
-  --glass-edge-out: rgba(0,0,0,0.06);
+  --bg-plane: #ffffff;
+  --bg-plane-accent: none;
+  --glass-1: #ffffff;
+  --glass-2: #ffffff;
+  --glass-edge-in: #ffffff;
+  --glass-edge-out: #e4e4e0;
   --surface: #ffffff;
-  --surface-muted: #f5f5f7;
+  --surface-muted: #f6f6f4;
   --surface-raised: #ffffff;
-  --ink-1: #1d1d1f;
-  --ink-2: #5a5a5f;
-  --ink-3: #7a7a80;
-  --line: rgba(0,0,0,0.07);
-  --line-strong: rgba(0,0,0,0.14);
-  --accent: #0071e3;
+  --ink-1: #000000;
+  --ink-body: #3d3d3a;
+  --ink-2: #5f5f5b;
+  --ink-3: #8a8a85;
+  --line: #e4e4e0;
+  --line-strong: #cfcfca;
+  --rule: #000000;
+  --hover-strong: #2b2b2b;
+  --accent: #000000;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(0,113,227,0.10);
-  --accent-text: #0066cc;
-  --ok: #34c759;       --ok-soft: rgba(52,199,89,0.14);      --ok-ink: #1b6e31;
-  --warn: #ff9f0a;     --warn-soft: rgba(255,159,10,0.16);   --warn-ink: #8a4b00;
-  --danger: #ff3b30;   --danger-soft: rgba(255,59,48,0.12);  --danger-ink: #b42318;
-  --info: #5856d6;     --info-soft: rgba(88,86,214,0.12);    --info-ink: #3634a3;
-  --neutral: #8e8e93;  --neutral-soft: rgba(142,142,147,0.11); --neutral-ink: #4a4a4e;
+  --accent-soft: #f6f6f4;
+  --accent-text: #000000;
+  --redline: #c8102e;
+  --chart-1: #000000;  --chart-2: #5f5f5b;  --chart-3: #a3a39e;  --chart-4: #cfcfca;  --chart-alert: #c8102e;
+  --ok: #000000;       --ok-soft: #f6f6f4;       --ok-ink: #000000;
+  --warn: #000000;     --warn-soft: #f6f6f4;     --warn-ink: #000000;
+  --danger: #c8102e;   --danger-soft: #fdf2f3;   --danger-ink: #c8102e;
+  --info: #000000;     --info-soft: #f6f6f4;     --info-ink: #000000;
+  --neutral: #a3a39e;  --neutral-soft: #f6f6f4;  --neutral-ink: #5f5f5b;
   /* END LIGHT */
 }
 
-/* Dark values, repeated verbatim in both selectors as section 5 prescribes. */
+/* Dark mode is switched off for now. The theme attribute and the system preference are still honoured
+   as selectors, but both resolve to the light values above; the empty DARK block keeps the contrast
+   report reading the same light palette for both modes. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg-plane: linear-gradient(180deg, #101012 0%, #08080a 45%, #000000 100%);
-    --bg-plane-accent:
-      radial-gradient(900px 600px at 8% -8%, rgba(41,151,255,0.16), transparent 62%),
-      radial-gradient(800px 560px at 96% 4%, rgba(191,90,242,0.12), transparent 60%),
-      radial-gradient(900px 700px at 70% 112%, rgba(255,159,10,0.07), transparent 62%);
-    --glass-1: rgba(30,30,34,0.66);
-    --glass-2: rgba(38,38,42,0.80);
-    --glass-edge-in: rgba(255,255,255,0.10);
-    --glass-edge-out: rgba(255,255,255,0.06);
-    --surface: #1c1c1e;
-    --surface-muted: #141416;
-    --surface-raised: #242427;
-    --ink-1: #f5f5f7;
-    --ink-2: #a1a1a6;
-    --ink-3: #7c7c82;
-    --line: rgba(255,255,255,0.08);
-    --line-strong: rgba(255,255,255,0.16);
-    --accent: #0071e3;
-    --accent-ink: #ffffff;
-    --accent-soft: rgba(41,151,255,0.18);
-    --accent-text: #4aa8ff;
-    --ok: #30d158;       --ok-soft: rgba(48,209,88,0.18);      --ok-ink: #5ee07f;
-    --warn: #ff9f0a;     --warn-soft: rgba(255,159,10,0.18);   --warn-ink: #ffb340;
-    --danger: #ff453a;   --danger-soft: rgba(255,69,58,0.18);  --danger-ink: #ff7b72;
-    --info: #5e5ce6;     --info-soft: rgba(94,92,230,0.22);    --info-ink: #a9a8ff;
-    --neutral: #8e8e93;  --neutral-soft: rgba(142,142,147,0.20); --neutral-ink: #c7c7cc;
-  }
+  :root:not([data-theme="light"]) { color-scheme: light; }
 }
 :root[data-theme="dark"] {
-  color-scheme: dark;
+  color-scheme: light;
   /* DARK */
-  --bg-plane: linear-gradient(180deg, #101012 0%, #08080a 45%, #000000 100%);
-  --bg-plane-accent:
-    radial-gradient(900px 600px at 8% -8%, rgba(41,151,255,0.16), transparent 62%),
-    radial-gradient(800px 560px at 96% 4%, rgba(191,90,242,0.12), transparent 60%),
-    radial-gradient(900px 700px at 70% 112%, rgba(255,159,10,0.07), transparent 62%);
-  --glass-1: rgba(30,30,34,0.66);
-  --glass-2: rgba(38,38,42,0.80);
-  --glass-edge-in: rgba(255,255,255,0.10);
-  --glass-edge-out: rgba(255,255,255,0.06);
-  --surface: #1c1c1e;
-  --surface-muted: #141416;
-  --surface-raised: #242427;
-  --ink-1: #f5f5f7;
-  --ink-2: #a1a1a6;
-  --ink-3: #7c7c82;
-  --line: rgba(255,255,255,0.08);
-  --line-strong: rgba(255,255,255,0.16);
-  --accent: #0071e3;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(41,151,255,0.18);
-  --accent-text: #4aa8ff;
-  --ok: #30d158;       --ok-soft: rgba(48,209,88,0.18);      --ok-ink: #5ee07f;
-  --warn: #ff9f0a;     --warn-soft: rgba(255,159,10,0.18);   --warn-ink: #ffb340;
-  --danger: #ff453a;   --danger-soft: rgba(255,69,58,0.18);  --danger-ink: #ff7b72;
-  --info: #5e5ce6;     --info-soft: rgba(94,92,230,0.22);    --info-ink: #a9a8ff;
-  --neutral: #8e8e93;  --neutral-soft: rgba(142,142,147,0.20); --neutral-ink: #c7c7cc;
   /* END DARK */
 }
 

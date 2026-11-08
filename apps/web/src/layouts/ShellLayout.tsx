@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
-import { LogOut, Monitor, Moon, Sun, UserRound } from 'lucide-react';
+import { UserRound } from 'lucide-react';
 import { AppShell } from '../ui/AppShell';
 import { BottomTabBar } from '../ui/BottomTabBar';
 import { CommandPalette, useCommandShortcut, type PaletteAction } from '../ui/CommandPalette';
@@ -50,7 +50,7 @@ export function ShellLayout({ iface }: { iface: 'firm' | 'team' }) {
 
 function Shell({ iface }: { iface: 'firm' | 'team' }) {
   const navigate = useNavigate();
-  const { viewer, setViewer, theme, setTheme } = useSession();
+  const { viewer, setViewer } = useSession();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [collapsedByUser, setCollapsedByUser] = useState(false);
   const [notifications, setNotifications] = useState<NotificationGroup[]>(() => (isLive ? [] : getNotifications()));
@@ -104,21 +104,18 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
     ];
   }, [navigate, firmAllowed, openLogTime, openLeave]);
 
+  // Light only for now: the theme choice is gone from the account menu (session.tsx forces light).
   const menuItems: MenuItem[] = [
     { label: 'My profile', icon: <UserRound {...iconProps} />, onSelect: () => navigate('/me/profile') },
-    { type: 'separator' },
-    { type: 'heading', label: 'Theme' },
-    { label: `System${theme === 'system' ? ' (current)' : ''}`, icon: <Monitor {...iconProps} />, onSelect: () => setTheme('system') },
-    { label: `Light${theme === 'light' ? ' (current)' : ''}`, icon: <Sun {...iconProps} />, onSelect: () => setTheme('light') },
-    { label: `Dark${theme === 'dark' ? ' (current)' : ''}`, icon: <Moon {...iconProps} />, onSelect: () => setTheme('dark') },
-    { type: 'separator' },
-    ...(isLive
-      ? [{ label: 'Sign out', icon: <LogOut {...iconProps} />, onSelect: () => { signOut().catch((e: unknown) => toast({ variant: 'danger', message: failureMessage(e) })); } }]
-      : [
-        { type: 'heading' as const, label: 'View as (mock)' },
-        ...VIEWERS.map((v) => ({ label: `${v.name}${v.id === viewer.id ? ' (current)' : ''}`, onSelect: () => setViewer(v.id) })),
-      ]),
+    ...(isLive ? [] : [
+      { type: 'separator' as const },
+      { type: 'heading' as const, label: 'View as (mock)' },
+      ...VIEWERS.map((v) => ({ label: `${v.name}${v.id === viewer.id ? ' (current)' : ''}`, onSelect: () => setViewer(v.id) })),
+    ]),
   ];
+  const onSignOut = isLive
+    ? () => { signOut().catch((e: unknown) => toast({ variant: 'danger', message: failureMessage(e) })); }
+    : () => navigate('/login');
 
   const tabs = iface === 'firm' && firmAllowed ? firmTabs(navigate) : teamTabs(navigate);
   const showFirmNav = iface === 'firm' && firmAllowed;
@@ -138,14 +135,13 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
             collapsed={collapsed}
             onToggleCollapsed={narrow ? undefined : () => setCollapsedByUser((c) => !c)}
             switcher={firmAllowed ? { value: iface, onChange: (v) => navigate(v === 'firm' ? '/firm/overview' : '/me/home') } : undefined}
+            user={{ name: viewer.name, title: viewer.title, menuItems, onSignOut }}
           />
         }
         topBar={
           <TopBar
             onSearch={openPalette}
             shortcut={isMac ? '⌘K' : 'Ctrl K'}
-            userName={viewer.name}
-            menuItems={menuItems}
             notifications={notifications}
             onMarkAllRead={markAllRead}
             timer={

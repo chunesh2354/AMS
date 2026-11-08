@@ -1,28 +1,40 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import { acceptInvite, getInvite, type InviteDetails } from '../../api/live/accounts';
-import { Button } from '../../ui/Button';
-import { Form } from '../../ui/Form';
-import { InlineAlert } from '../../ui/InlineAlert';
 import { Skeleton } from '../../ui/Skeleton';
-import { TextField } from '../../ui/TextField';
+import { AuthAlert, AuthHeading, AuthPage, AuthSplit, LOGIN_PATHS, SecretInput } from './frame';
 
+/** The server refuses anything shorter (accounts.routes MIN_PASSWORD). */
 export const MIN_PASSWORD = 12;
 const HOME = '/me/home';
 
 type Load = { state: 'loading' } | { state: 'ready'; invite: InviteDetails } | { state: 'expired' } | { state: 'invalid' } | { state: 'error'; message: string };
 
-/** The glass card on the plane, like the sign-in screen. */
-function Card({ children }: { children: ReactNode }) {
+/** The invite page's frame: the Practice header, the form side and the studio clock. */
+function Frame({ children }: { children: ReactNode }) {
+  return <AuthPage><AuthSplit wide>{children}</AuthSplit></AuthPage>;
+}
+
+const TICK = 'M5 12.5l4.5 4.5L19 7.5';
+const DOT = 'M12 12h.01';
+
+/** One live rule under the password: a dot until it is met, then a tick. Missed rules turn redline after a submit. */
+function Rule({ met, missed, children }: { met: boolean; missed: boolean; children: string }) {
   return (
-    <main style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'var(--s-4)' }}>
-      <div className="glass glass--elevated" style={{ width: '100%', maxWidth: 440, padding: 'var(--s-8)', borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column', gap: 'var(--s-6)' }}>
-        {children}
-      </div>
-    </main>
+    <li className={`auth-rules__item${met ? ' is-met' : missed ? ' is-missed' : ''}`}>
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={met ? TICK : DOT} /></svg>
+      {children}
+      <span className="sr-only">{met ? ', done' : ', not yet'}</span>
+    </li>
   );
 }
+
+const expiryDate = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
+};
 
 /** /accept-invite/:token, outside the shell. The person sets a password and is signed in. */
 export function AcceptInviteScreen({ onAccepted = () => window.location.assign(HOME) }: { onAccepted?: () => void }) {
@@ -30,6 +42,7 @@ export function AcceptInviteScreen({ onAccepted = () => window.location.assign(H
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [shown, setShown] = useState(false);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -48,8 +61,10 @@ export function AcceptInviteScreen({ onAccepted = () => window.location.assign(H
     return () => { alive = false; };
   }, [token]);
 
+  const longEnough = password.length >= MIN_PASSWORD;
+  const matches = password.length > 0 && password === confirm;
   const errors = {
-    password: password.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters` : undefined,
+    password: !longEnough ? `Use at least ${MIN_PASSWORD} characters` : undefined,
     confirm: !confirm ? 'Enter the password again' : confirm !== password ? 'The passwords do not match' : undefined,
   };
 
@@ -57,7 +72,10 @@ export function AcceptInviteScreen({ onAccepted = () => window.location.assign(H
     e.preventDefault();
     setTried(true);
     setFailure(null);
-    if (errors.password || errors.confirm) return;
+    if (errors.password || errors.confirm) {
+      document.getElementById(errors.password ? 'new-password' : 'confirm-password')?.focus();
+      return;
+    }
     setBusy(true);
     try {
       await acceptInvite(token, password);
@@ -70,49 +88,83 @@ export function AcceptInviteScreen({ onAccepted = () => window.location.assign(H
   };
 
   if (!isLive) {
-    return <Card><h1 className="t-h1">Accept invite</h1><InlineAlert variant="info" title="Invitations work only when the app is connected to the database." /></Card>;
+    return <Frame><AuthHeading title="Accept invite" /><p className="auth-note" role="status">Invitations work only when the app is connected to the database.</p></Frame>;
   }
-  if (load.state === 'loading') return <Card><Skeleton kind="card" /></Card>;
+  if (load.state === 'loading') return <Frame><Skeleton kind="card" /></Frame>;
   if (load.state === 'expired' || load.state === 'invalid') {
     return (
-      <Card>
-        <h1 className="t-h1">{load.state === 'expired' ? 'This invite link has expired' : 'This invite link is not valid'}</h1>
-        <p className="t-body-sm">Invite links work once and last 72 hours. Ask your firm admin to send you a new one.</p>
-        <span><Button onClick={() => window.location.assign('/login')}>Go to sign in</Button></span>
-      </Card>
+      <Frame>
+        <AuthHeading
+          title={load.state === 'expired' ? 'This invite link has expired' : 'This invite link is not valid'}
+          lead="Invite links work once and last 72 hours. Ask your firm admin to send you a new one."
+        />
+        <Link className="auth-button" to={LOGIN_PATHS.chooser}>Go to sign in</Link>
+      </Frame>
     );
   }
-  if (load.state === 'error') return <Card><h1 className="t-h1">Accept invite</h1><InlineAlert variant="danger" title={load.message} /></Card>;
+  if (load.state === 'error') return <Frame><AuthHeading title="Accept invite" /><AuthAlert>{load.message}</AuthAlert></Frame>;
 
   const { invite } = load;
+  const expires = expiryDate(invite.expires_at);
+  const passwordError = tried ? errors.password : undefined;
+  const confirmError = tried ? errors.confirm : undefined;
   return (
-    <Card>
-      <div>
-        <h1 className="t-h1">Join {invite.firm_name}</h1>
-        <p className="t-body-sm">Set a password to finish setting up your account.</p>
-      </div>
-      <dl className="t-body-sm" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--s-1) var(--s-4)', margin: 0 }}>
-        <dt className="ink-2">Name</dt><dd style={{ margin: 0 }}>{invite.name}</dd>
-        <dt className="ink-2">Work email</dt><dd style={{ margin: 0 }}>{invite.work_email}</dd>
-        <dt className="ink-2">Company</dt><dd style={{ margin: 0 }}>{invite.firm_name}</dd>
+    <Frame>
+      <AuthHeading title={`Join ${invite.firm_name}`} lead="Set a password to finish setting up your account." />
+      <dl className="auth-facts">
+        <dt>Name</dt><dd>{invite.name}</dd>
+        <dt>Work email</dt><dd>{invite.work_email}</dd>
+        <dt>Company</dt><dd>{invite.firm_name}</dd>
       </dl>
-      {failure && <InlineAlert variant="danger" title={failure} />}
-      <Form onSubmit={submit} aria-label="Set your password">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
-          <input type="email" name="username" autoComplete="username" value={invite.work_email} readOnly hidden />
-          <TextField
-            label="Password" type="password" name="new-password" autoComplete="new-password" autoFocus value={password}
-            helper={`At least ${MIN_PASSWORD} characters.`} error={tried ? errors.password : undefined}
-            onChange={(e) => setPassword(e.target.value)}
+      {failure && <AuthAlert>{failure}</AuthAlert>}
+      <form className="auth-form" onSubmit={submit} aria-label="Set your password" noValidate>
+        <input type="email" name="username" autoComplete="username" value={invite.work_email} readOnly hidden />
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="new-password">New password</label>
+          <SecretInput
+            shown={shown}
+            onToggle={() => setShown((s) => !s)}
+            inputProps={{
+              id: 'new-password',
+              name: 'new-password',
+              autoComplete: 'new-password',
+              autoFocus: true,
+              value: password,
+              'aria-invalid': passwordError ? true : undefined,
+              'aria-describedby': passwordError ? 'pw-rules new-password-error' : 'pw-rules',
+              onChange: (e) => setPassword(e.target.value),
+            }}
           />
-          <TextField
-            label="Confirm password" type="password" name="confirm-password" autoComplete="new-password" value={confirm}
-            error={tried ? errors.confirm : undefined}
+          <ul id="pw-rules" className="auth-rules">
+            <Rule met={longEnough} missed={tried}>{`At least ${MIN_PASSWORD} characters`}</Rule>
+            <Rule met={matches} missed={tried}>Both passwords match</Rule>
+          </ul>
+          {passwordError && <p id="new-password-error" className="auth-field-error">{passwordError}</p>}
+        </div>
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="confirm-password">Confirm password</label>
+          <input
+            id="confirm-password"
+            className="auth-input"
+            type={shown ? 'text' : 'password'}
+            name="confirm-password"
+            autoComplete="new-password"
+            value={confirm}
+            aria-invalid={confirmError ? true : undefined}
+            aria-describedby={confirmError ? 'confirm-password-error' : undefined}
             onChange={(e) => setConfirm(e.target.value)}
           />
-          <Button type="submit" variant="primary" size="cta" loading={busy}>Set password and sign in</Button>
+          {confirmError && <p id="confirm-password-error" className="auth-field-error">{confirmError}</p>}
         </div>
-      </Form>
-    </Card>
+        <button type="submit" className="auth-submit" disabled={busy} aria-busy={busy || undefined}>
+          {busy && <Loader2 size={18} strokeWidth={1.5} className="auth-submit__spin" aria-hidden />}
+          Set password and sign in
+        </button>
+        <p className="auth-fineprint">
+          {expires ? `This link works once and expires on ${expires}. ` : 'This link works once. '}
+          Already set a password? <Link to={LOGIN_PATHS.team}>Sign in</Link>.
+        </p>
+      </form>
+    </Frame>
   );
 }

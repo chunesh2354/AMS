@@ -9,6 +9,7 @@ const sections: NavSection[] = [
   { label: 'Work', items: [{ to: '/firm/overview', label: 'Overview', icon: <LayoutDashboard {...i} /> }, { to: '/firm/approvals', label: 'Approvals', icon: <Inbox {...i} />, badge: 14 }] },
   { label: 'People', items: [{ to: '/firm/people', label: 'People', icon: <Users {...i} /> }, { to: '/firm/workload', label: 'Workload', icon: <CalendarRange {...i} /> }] },
 ];
-export const Expanded: StoryObj = { render: () => <SideNav brand="Studio Meridian (DEMO)" sections={sections} onToggleCollapsed={() => {}} switcher={{ value: 'firm', onChange: () => {} }} /> };
-export const Collapsed: StoryObj = { render: () => <SideNav collapsed brand="Studio Meridian (DEMO)" sections={sections} onToggleCollapsed={() => {}} switcher={{ value: 'firm', onChange: () => {} }} /> };
+const user = { name: 'Asha Rao', title: 'Principal', menuItems: [{ label: 'My profile' }], onSignOut: () => {} };
+export const Expanded: StoryObj = { render: () => <SideNav brand="Studio Meridian (DEMO)" sections={sections} onToggleCollapsed={() => {}} switcher={{ value: 'firm', onChange: () => {} }} user={user} /> };
+export const Collapsed: StoryObj = { render: () => <SideNav collapsed brand="Studio Meridian (DEMO)" sections={sections} onToggleCollapsed={() => {}} switcher={{ value: 'firm', onChange: () => {} }} user={user} /> };
 export const SingleInterface: StoryObj = { render: () => <SideNav brand="Studio Meridian (DEMO)" sections={sections} /> };

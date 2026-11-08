@@ -7,7 +7,7 @@ import { ErrorState } from '../ui/ErrorState';
 import { Skeleton } from '../ui/Skeleton';
 
 /**
- * Mock session for the UI build: who is viewing, and the theme. No auth and no persistence.
+ * Mock session for the UI build: who is viewing, and the theme (always light for now). No auth and no persistence.
  * `?as=P04` picks the starting viewer, which is how screenshots open as Rohan Shetty.
  * In live mode (VITE_LIVE=1) the viewer comes from GET /me instead, and `id` is the ref code (P01).
  */
@@ -53,13 +53,11 @@ type Session = {
 
 const Ctx = createContext<Session | null>(null);
 
+/** Dark mode is switched off for now: the app is always light and the account menu offers no theme choice. */
+const keepLight = () => {};
 function useThemeChoice() {
-  const [theme, setTheme] = useState<ThemeChoice>('system');
-  useEffect(() => {
-    if (theme === 'system') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = theme;
-  }, [theme]);
-  return [theme, setTheme] as const;
+  useEffect(() => { document.documentElement.dataset.theme = 'light'; }, []);
+  return ['light' as ThemeChoice, keepLight as (t: ThemeChoice) => void] as const;
 }
 
 type ProviderProps = { children: ReactNode; initialViewer?: string };
@@ -102,9 +100,9 @@ export const viewerFromMe = (me: MeResponse): Viewer => ({
 const NO_VIEWER: Viewer = { id: '', name: '', title: '', roles: [] };
 const noop = () => {};
 
-/** Paths that render without a firm viewer: the login page, the invite page and the platform console (its own session). */
-const NO_VIEWER_PATHS = ['/platform', '/accept-invite'];
-const needsNoViewer = (path: string) => path === '/login' || NO_VIEWER_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+/** Paths that render without a firm viewer: the sign-in pages (/login and below), the invite page and the platform console (its own session). */
+const NO_VIEWER_PATHS = ['/login', '/platform', '/accept-invite'];
+const needsNoViewer = (path: string) => NO_VIEWER_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 
 /** Loads the signed-in person. Those pages render without one; a 401 anywhere else goes to /login inside apiFetch. */
 function LiveSessionProvider({ children }: { children: ReactNode }) {

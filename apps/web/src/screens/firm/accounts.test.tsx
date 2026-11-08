@@ -127,13 +127,13 @@ describe('Accept invite', () => {
     expect(screen.getByText('kiran@firm.test')).toBeInTheDocument();
     const submit = screen.getByRole('button', { name: 'Set password and sign in' });
 
-    await userEvent.type(screen.getByLabelText('Password'), 'short');
+    await userEvent.type(screen.getByLabelText('New password'), 'short');
     await userEvent.click(submit);
     expect(screen.getByText('Use at least 12 characters')).toBeInTheDocument();
     expect(screen.getByText('Enter the password again')).toBeInTheDocument();
 
-    await userEvent.clear(screen.getByLabelText('Password'));
-    await userEvent.type(screen.getByLabelText('Password'), 'a-long-password-1');
+    await userEvent.clear(screen.getByLabelText('New password'));
+    await userEvent.type(screen.getByLabelText('New password'), 'a-long-password-1');
     await userEvent.type(screen.getByLabelText('Confirm password'), 'a-long-password-2');
     await userEvent.click(submit);
     expect(screen.getByText('The passwords do not match')).toBeInTheDocument();

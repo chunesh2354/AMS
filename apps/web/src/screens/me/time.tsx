@@ -145,17 +145,23 @@ export function MyTimeScreen() {
     : <Button variant="primary" disabled={!lines.length} onClick={submit}>Submit week</Button>;
   const effective = state !== 'ready' ? state : 'ready';
   return (
-    <>
+    <div className="scr-mytime">
+      <div className="mytime-timer">
+        <TimerPill state={timer.running ? 'running' : 'idle'} elapsedSeconds={timer.elapsed} context={timer.context} onStart={timerStart} onStop={timerStop} />
+        {timer.running && !isLive && <span className="t-body-sm ink-2">Concept option B, courtyard</span>}
+      </div>
       <PageHeader
         title="My time"
-        meta={<StatusChip size="sm" status={status} />}
-        period={<PeriodNav range={data?.range ?? ''} onPrev={() => setOffset((o) => (isLive ? o - 1 : Math.max(-1, o - 1)))} onNext={() => setOffset((o) => (isLive ? o + 1 : Math.min(1, o + 1)))} onToday={() => setOffset(0)} />}
+        subtitle={data && state === 'ready'
+          ? <>{offset === 0 ? 'This week, ' : 'This timesheet, '}<span className="t-numeric">{formatHours(total)}</span> of <span className="t-numeric">{formatHours(scheduled)}</span> scheduled</>
+          : undefined}
         secondaryActions={<Button onClick={() => openLogTime()}>Log time</Button>}
         primaryAction={primary}
       />
-      <div className="toolbar">
-        <TimerPill state={timer.running ? 'running' : 'idle'} elapsedSeconds={timer.elapsed} context={timer.context} onStart={timerStart} onStop={timerStop} />
-        {timer.running && !isLive && <span className="t-body-sm ink-2">Concept option B, courtyard</span>}
+      <section className="mytime-week" aria-label="Week">
+      <div className="mytime-week__head">
+        <PeriodNav range={data?.range ?? ''} onPrev={() => setOffset((o) => (isLive ? o - 1 : Math.max(-1, o - 1)))} onNext={() => setOffset((o) => (isLive ? o + 1 : Math.min(1, o + 1)))} onToday={() => setOffset(0)} />
+        <StatusChip size="sm" status={status} />
       </div>
       {effective !== 'ready'
         ? <ListStateBlock state={effective} label="This timesheet" rows={6} onRetry={retry} capability="view this timesheet" empty={{ message: 'No time has been logged this week.', action: <Button variant="primary" onClick={() => openPicker(null)}>Add line</Button> }} />
@@ -165,7 +171,12 @@ export function MyTimeScreen() {
             <>
               <TimesheetGrid label={`Timesheet, ${data?.range}`} days={days} lines={lines} onChange={change} onAddLine={readOnlyWeek ? undefined : () => openPicker(null)} />
               <div className="stack-rows">
-                {longDays.map(({ d, h }) => <InlineAlert key={d.key} variant="warn" title={`${LONG[d.label]} has ${formatHours(h)}`}>Days over 12 h go to your approver as an exception.</InlineAlert>)}
+                {longDays.map(({ d, h }) => (
+                  <p key={d.key} className="mytime-notice">
+                    <span className="marker marker--alert" aria-hidden />
+                    <span><span>{`${LONG[d.label]} has ${formatHours(h)}`}</span>. Days over 12 h go to your approver as an exception.</span>
+                  </p>
+                ))}
                 {returned.map((l) => <InlineAlert key={l.id} variant={showErrors ? 'danger' : 'warn'} title={`${l.title} was returned`}>{l.reason}. Change its hours or move them to fix it.</InlineAlert>)}
                 {unclassified.map((l) => (
                   <div key={l.id} className="stack-rows">
@@ -175,10 +186,10 @@ export function MyTimeScreen() {
                 ))}
                 {serverError && <p className="form__summary" role="alert">{serverError}</p>}
                 {showErrors && blockers > 0 && <p className="form__summary" role="status">Fix {blockers} {blockers === 1 ? 'line' : 'lines'} before you submit.</p>}
-                <p className="t-body-sm">Week total <span className="t-numeric">{formatHours(total)}</span> of <span className="t-numeric">{formatHours(scheduled)}</span> scheduled</p>
               </div>
             </>
           )}
+      </section>
       <Sheet
         open={!!picking} onClose={() => setPicking(null)} title={picking?.lineId ? 'Choose project and phase' : 'Add line'}
         footer={<><Button variant="ghost" onClick={() => setPicking(null)}>Cancel</Button><Button variant="primary" onClick={savePick}>{picking?.lineId ? 'Save' : 'Add line'}</Button></>}
@@ -199,6 +210,6 @@ export function MyTimeScreen() {
           </FormSection>
         </Form>
       </Sheet>
-    </>
+    </div>
   );
 }

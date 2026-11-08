@@ -4,7 +4,9 @@ export type ChartColor = 'accent' | 'ok' | 'warn' | 'danger' | 'neutral';
 export type ChartDatum = { label: string; value: number; color?: ChartColor; display?: string };
 export type MiniChartProps = { kind: 'bar' | 'line' | 'donut'; label: string; data: ChartDatum[] };
 
-const fill = (c: ChartColor = 'accent') => `var(--${c})`;
+/** Charts are drawn in black and greys; the redline is kept for the series that is a problem. */
+const CHART_TOKEN: Record<ChartColor, string> = { accent: 'chart-1', ok: 'chart-2', warn: 'chart-3', neutral: 'chart-4', danger: 'chart-alert' };
+const fill = (c: ChartColor = 'accent') => `var(--${CHART_TOKEN[c]})`;
 const show = (d: ChartDatum) => d.display ?? String(d.value);
 
 function Bars({ data }: { data: ChartDatum[] }) {
@@ -38,7 +40,7 @@ function Line({ data }: { data: ChartDatum[] }) {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} aria-hidden>
       <line x1={0} x2={W} y1={H - 1} y2={H - 1} stroke="var(--line-strong)" />
-      <polyline points={pts} fill="none" stroke={fill(data[0]?.color)} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={pts} fill="none" stroke={fill(data[0]?.color)} strokeWidth={2} strokeLinecap="square" strokeLinejoin="miter" />
       {data.map((d, i) => (
         <circle key={d.label} cx={x(i)} cy={y(d.value)} r={3} fill={fill(d.color)} stroke="var(--surface)" strokeWidth={1}><title>{`${d.label}: ${show(d)}`}</title></circle>
       ))}
@@ -53,7 +55,7 @@ function Donut({ data }: { data: ChartDatum[] }) {
   return (
     <div className="chart__donut">
       <svg viewBox="0 0 112 112" aria-hidden>
-        <circle cx={56} cy={56} r={R} fill="none" stroke="var(--neutral-soft)" strokeWidth={12} />
+        <circle cx={56} cy={56} r={R} fill="none" stroke="var(--surface-muted)" strokeWidth={12} />
         {data.filter((d) => d.value > 0).map((d) => {
           const len = (d.value / total) * C;
           const seg = (

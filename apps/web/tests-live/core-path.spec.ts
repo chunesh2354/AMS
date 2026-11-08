@@ -15,7 +15,8 @@ const RUN = String(process.env.E2E_RUN ?? Date.now().toString(36));
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function login(page: Page, who: string, password = PASSWORD) {
-  await page.goto('/login');
+  // /login is the chooser; the firm sign-in form lives at /login/studio (and /login/team).
+  await page.goto('/login/studio');
   await page.getByLabel('Work email').fill(`${who}@meridian.demo`);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -29,7 +30,7 @@ async function acceptInvite(browser: Browser, url: string, shotName?: string) {
   await page.goto(url);
   await expect(page.getByRole('heading', { name: /^Join / })).toBeVisible();
   if (shotName) await shot(page, `${shotName}-light`);
-  await page.getByLabel('Password', { exact: true }).fill(NEW_PASSWORD);
+  await page.getByLabel('New password', { exact: true }).fill(NEW_PASSWORD);
   await page.getByLabel('Confirm password').fill(NEW_PASSWORD);
   await page.getByRole('button', { name: 'Set password and sign in' }).click();
   await page.waitForURL((u) => !u.pathname.startsWith('/accept-invite'));
@@ -56,8 +57,8 @@ test('6. unconnected route shows sample banner; sign out requires login', async 
   await page.goto('/firm/people');
   await expect(page.getByText('Sample data. This screen is not connected to the database yet.')).toBeVisible();
   await shot(page, 'sample-banner');
-  await page.getByRole('button', { name: /account|avatar|menu/i }).first().click();
-  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  // The redesign puts Sign out at the foot of the side nav instead of in an account menu.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login/);
   await page.goto('/firm/billing');
   await expect(page).toHaveURL(/\/login/);
@@ -113,7 +114,7 @@ async function addAccount(page: Page, name: string, email: string, types: { chec
 async function firmLogin(browser: Browser, email: string, password: string) {
   const ctx = await browser.newContext({ baseURL: 'http://localhost:4273' });
   const page = await ctx.newPage();
-  await page.goto('/login');
+  await page.goto('/login/studio');
   await page.getByLabel('Work email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();

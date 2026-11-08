@@ -80,7 +80,9 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
 
   const text = await res.text();
   if (!res.ok) {
-    if (res.status === 401 && window.location.pathname !== LOGIN_PATH) window.location.assign(LOGIN_PATH);
+    // The sign-in pages (/login, /login/studio, /login/team) show the 401 themselves.
+    const onSignIn = window.location.pathname === LOGIN_PATH || window.location.pathname.startsWith(`${LOGIN_PATH}/`);
+    if (res.status === 401 && !onSignIn) window.location.assign(LOGIN_PATH);
     throw parseFailure(res.status, text);
   }
   return (text ? JSON.parse(text) : undefined) as T;

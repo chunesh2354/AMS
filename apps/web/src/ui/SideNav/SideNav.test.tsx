@@ -27,3 +27,12 @@ it('switches interface', async () => {
   await userEvent.click(screen.getByRole('radio', { name: 'Team' }));
   expect(onChange).toHaveBeenCalledWith('team');
 });
+it('shows the signed-in person with the account menu and Sign out', async () => {
+  const onSignOut = vi.fn();
+  wrap(<SideNav brand="Demo" sections={sections} user={{ name: 'Asha Rao', title: 'Principal', menuItems: [{ label: 'My profile' }], onSignOut }} />);
+  expect(screen.getByText('Practice')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /Asha Rao.*account menu/ }));
+  expect(screen.getByRole('menuitem', { name: 'My profile' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  expect(onSignOut).toHaveBeenCalled();
+});

@@ -67,7 +67,7 @@ function Body({ onClose, actions, loading }: Omit<CommandPaletteProps, 'open'>) 
   return (
     <>
       <div className="palette-scrim" onClick={onClose} />
-      <div ref={panel} className="palette glass glass--elevated" role="dialog" aria-modal="true" aria-label="Command palette" onKeyDown={onKey}>
+      <div ref={panel} className="palette" role="dialog" aria-modal="true" aria-label="Command palette" onKeyDown={onKey}>
         <div className="palette__input">
           <Search size={20} strokeWidth={1.5} aria-hidden />
           <input

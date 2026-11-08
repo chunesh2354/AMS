@@ -1,26 +1,21 @@
-/* Section 5.2. Blur is 20px (the limit; --glass-blur in tokens.css); glass never stacks more than two deep.
-   Keep -webkit-backdrop-filter BEFORE backdrop-filter: the CSS minifier keeps only the last of the two,
-   and with the prefixed one last, Chromium gets no blur at all. tests/shell.spec.ts guards this. */
+/* Section 5.2, approved redesign. Glass is retired: the class names stay so every component keeps its
+   structure, but a "glass" panel is now plain white paper with a 1px hairline and square corners.
+   No blur, no translucency. Only the elevated variant (sheets, menus, popovers, toasts, tooltips)
+   carries the single soft shadow allowed for floating layers. */
 .glass {
-  background: var(--glass-1);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge-out);
-  box-shadow: inset 0 1px 0 var(--glass-edge-in), var(--shadow-glass);
-  border-radius: var(--radius-lg);
+  background: var(--surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  border-radius: 0;
 }
 .glass--elevated {
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--glass-edge-in), var(--shadow-glass-elevated);
+  background: var(--surface);
+  box-shadow: var(--shadow-glass-elevated);
 }
 .glass--bar {
   border-radius: 0;
   border-width: 0 0 1px 0;
-  box-shadow: inset 0 1px 0 var(--glass-edge-in);
-}
-@supports not (backdrop-filter: blur(1px)) {
-  .glass, .glass--elevated { background: var(--surface); }
-}
-@media (prefers-reduced-transparency: reduce) {
-  .glass, .glass--elevated { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  box-shadow: none;
 }
