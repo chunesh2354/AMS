@@ -78,7 +78,7 @@ EOF
     --iam-instance-profile "Name=${ROLE}" --security-group-ids "$SG" \
     --metadata-options HttpTokens=required,HttpEndpoint=enabled \
     --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=20,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}' \
-    --user-data "file://${USERDATA}" \
+    --user-data "file://$(command -v cygpath >/dev/null && cygpath -m "$USERDATA" || echo "$USERDATA")" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=ams-staging},{$TAGS}]" "ResourceType=volume,Tags=[{$TAGS}]" \
     --query 'Instances[0].InstanceId')
   rm -f "$USERDATA"
