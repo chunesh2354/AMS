@@ -8,7 +8,9 @@ import { isUuid, required } from '../../http/validation';
 /**
  * Platform administration: the people who run the service, not any firm's users.
  * Separate login and cookie (never the firm session). Every read and write goes through
- * SECURITY DEFINER functions from migration 002; the ams_app role has no grant on the platform tables.
+ * SECURITY DEFINER functions (migrations 002 and 003); the ams_app role has no grant on the platform tables.
+ * Since 003 every platform action takes the session token hash and the database resolves the admin from it,
+ * so no admin id is ever passed except to platform_create_session right after the password is verified.
  * Firm data never crosses this boundary: the firm list carries counts only.
  */
 export const PLATFORM_COOKIE = 'ams_platform';
@@ -18,7 +20,7 @@ const SESSION_HOURS = 12;
 const INVITE_HOURS = 72;
 const DUMMY_HASH = hash('not-a-real-platform-password');
 
-export type PlatformAdmin = { id: string; name: string; email: string; sessionId: string | null };
+export type PlatformAdmin = { id: string; name: string; email: string; sessionId: string | null; tokenHash: string };
 const admins = new WeakMap<FastifyRequest, PlatformAdmin>();
 
 const unauthenticated = () => new ApiError(401, 'UNAUTHENTICATED', 'Please sign in to the platform console.');
@@ -46,17 +48,29 @@ function reasonOf(body: any) {
 export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCookie?: boolean } = {}) {
   const cookieOpts = { path: COOKIE_PATH, httpOnly: true, sameSite: 'strict' as const, secure: !!opts.secureCookie };
 
+  /** A session that ends between the guard and the call (errcode 28000 from the database) is a 401, not a 500. */
+  const query = async (sql: string, params: unknown[]) => {
+    try {
+      return await pool.query(sql, params);
+    } catch (e: any) {
+      if (e?.code === '28000') throw unauthenticated();
+      throw e;
+    }
+  };
+
   /** Only the ams_platform cookie counts here. A firm session cookie or bearer token is ignored. */
   const guard = async (req: FastifyRequest) => {
     const token = req.cookies?.[PLATFORM_COOKIE];
     if (!token) throw unauthenticated();
-    const s = (await pool.query('select * from platform_find_session($1)', [hashToken(token)])).rows[0];
+    const tokenHash = hashToken(token);
+    const s = (await pool.query('select * from platform_find_session($1)', [tokenHash])).rows[0];
     if (!s) throw unauthenticated();
     admins.set(req, {
-      id: s.admin_id ?? s.id,
-      name: s.name ?? s.admin_name ?? '',
-      email: s.email ?? s.admin_email ?? '',
+      id: s.admin_id,
+      name: s.name ?? '',
+      email: s.email ?? '',
       sessionId: s.session_id ?? null,
+      tokenHash,
     });
   };
   const adminOf = (req: FastifyRequest) => {
@@ -70,13 +84,14 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
   app.post('/api/v1/platform/auth/login', async (req: FastifyRequest, reply: FastifyReply) => {
     const body = (req.body ?? {}) as { email?: string; password?: string };
     required(body, ['email', 'password']);
-    const a = (await pool.query('select * from platform_find_admin($1)', [String(body.email).trim()])).rows[0];
+    // The only call that returns a password hash, and it returns nothing else but the admin id.
+    const a = (await pool.query('select admin_id, password_hash from platform_auth_lookup($1)', [String(body.email).trim()])).rows[0];
     // Verify even for an unknown email, so neither the status, the body nor the timing tells them apart.
     const ok = await verify(a?.password_hash ?? (await DUMMY_HASH), String(body.password)).catch(() => false);
     if (!a || !ok) throw new ApiError(401, 'INVALID_CREDENTIALS', 'That email and password do not match.');
     const token = newToken();
     const expires = new Date(Date.now() + SESSION_HOURS * 3600_000);
-    await pool.query('select platform_create_session($1, $2, $3)', [a.id ?? a.admin_id, hashToken(token), expires]);
+    await pool.query('select platform_create_session($1, $2, $3)', [a.admin_id, hashToken(token), expires]);
     reply.setCookie(PLATFORM_COOKIE, token, { ...cookieOpts, maxAge: SESSION_HOURS * 3600 });
     return { ok: true };
   });
@@ -94,12 +109,12 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
   });
 
   // ----- Firms: counts only, never business data or the names of a firm's people. -----
-  app.get('/api/v1/platform/firms', secured, async () => {
-    const rows = (await pool.query('select * from platform_list_firms()')).rows;
+  app.get('/api/v1/platform/firms', secured, async (req) => {
+    const rows = (await query('select * from platform_list_firms($1)', [adminOf(req).tokenHash])).rows;
     // Explicit allow-list: whatever the function returns, only these keys leave the server.
     return {
       data: rows.map((r) => ({
-        id: r.id ?? r.firm_id,
+        id: r.id,
         trading_name: r.trading_name,
         legal_name: r.legal_name,
         status: r.status,
@@ -140,15 +155,15 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
     const expires = new Date(Date.now() + INVITE_HOURS * 3600_000);
     let row: any;
     try {
-      row = (await pool.query(
+      row = (await query(
         'select * from platform_create_firm($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-        [tradingName, legalName, timezone, currency, ownerName, ownerEmail, hashToken(token), expires, admin.id],
+        [admin.tokenHash, tradingName, legalName, timezone, currency, ownerName, ownerEmail, hashToken(token), expires],
       )).rows[0];
     } catch (e: any) {
       if (e?.code === '23505') throw new ApiError(409, 'DUPLICATE_EMAIL', 'Someone already signs in with that email.', [{ field: 'owner_email', code: 'duplicate' }]);
       throw e;
     }
-    const firmId = row?.firm_id ?? row?.platform_create_firm ?? row?.id;
+    const firmId = row?.firm_id;
     return { firm_id: firmId, invite_url: `/accept-invite/${token}`, invite_expires_at: expires.toISOString(), email_sent: false };
   });
 
@@ -157,17 +172,17 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
     const id = (req.params as { id?: string }).id;
     if (!isUuid(id)) throw notFound('Firm');
     const reason = reasonOf(req.body);
-    const exists = (await pool.query('select * from platform_list_firms()')).rows.find((r) => (r.id ?? r.firm_id) === id);
+    const exists = (await query('select * from platform_list_firms($1)', [admin.tokenHash])).rows.find((r) => r.id === id);
     if (!exists) throw notFound('Firm');
-    await pool.query('select platform_set_firm_status($1, $2, $3, $4)', [id, status, reason, admin.id]);
+    await query('select platform_set_firm_status($1, $2, $3, $4)', [admin.tokenHash, id, status, reason]);
     return { id, status };
   };
   app.post('/api/v1/platform/firms/:id/suspend', secured, setStatus('Suspended'));
   app.post('/api/v1/platform/firms/:id/reactivate', secured, setStatus('Active'));
 
   // ----- Platform audit -----
-  app.get('/api/v1/platform/audit', secured, async () => {
-    const rows = (await pool.query('select * from platform_audit_list()')).rows;
+  app.get('/api/v1/platform/audit', secured, async (req) => {
+    const rows = (await query('select * from platform_audit_list($1)', [adminOf(req).tokenHash])).rows;
     return {
       data: rows.map((r) => ({
         id: r.id, at: iso(r.at), admin_name: r.admin_name ?? null, action: r.action,

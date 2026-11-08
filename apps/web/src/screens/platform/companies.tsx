@@ -19,7 +19,7 @@ import { Sheet } from '../../ui/Sheet';
 import { StatusChip } from '../../ui/StatusChip';
 import { TextArea } from '../../ui/TextArea';
 import { TextField } from '../../ui/TextField';
-import { formatDate, formatGrouped } from '../../ui/format';
+import { formatDate, formatGrouped, toISO } from '../../ui/format';
 
 export const PRODUCT_NAME = 'Practice platform';
 
@@ -27,7 +27,11 @@ const TIMEZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/Londo
 const CURRENCIES = ['INR', 'AED', 'SGD', 'GBP', 'USD', 'AUD'];
 
 const dateOf = (iso: string) => formatDate(iso.slice(0, 10));
-const dateTimeOf = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** Same date style as the rest of the app ("08 Nov 2026"), in local time, then the time. */
+const dateTimeOf = (iso: string) => {
+  const d = new Date(iso);
+  return `${formatDate(toISO(d))}, ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+};
 
 /** /platform. A layout of its own, outside the firm shell: no firm nav, no firm data, counts only. */
 export function PlatformCompaniesScreen() {

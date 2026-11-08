@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerUrl } from '../src/dev/db';
 import { PLATFORM_DEMO_EMAIL, PLATFORM_DEMO_PASSWORD, seedPlatformAdmin } from '../src/dev/platform-admin';
+import { hashToken } from '../src/auth/sessions';
 import { freshApp, type Fresh } from './helpers';
 
 const TEST_PORT = 54331;
@@ -280,6 +281,142 @@ describe('platform tables are closed to the app role', () => {
       await expect(app.query('select * from platform_session')).rejects.toThrow(/permission denied/);
       await expect(app.query('select * from platform_audit')).rejects.toThrow(/permission denied/);
       await expect(app.query(`insert into platform_admin (email, name, password_hash) values ('x@x.example', 'x', 'x')`)).rejects.toThrow(/permission denied/);
+    } finally {
+      await app.end();
+    }
+  });
+});
+
+describe('platform functions are bound to a live platform session (migration 003)', () => {
+  const c = withPlatform();
+  const FUTURE = () => new Date(Date.now() + 3600_000);
+  const made = hashToken('made-up-token-that-was-never-issued');
+
+  /** What a stray call could have changed: firms, platform audit rows, invites and people. */
+  const snapshot = async () => {
+    const q = async (sql: string) => (await c.f.owner.query(sql)).rows;
+    return JSON.stringify([
+      await q('select id, status, suspended_reason from firm order by id'),
+      await q('select count(*)::int as n from platform_audit'),
+      await q('select count(*)::int as n from invitation_token'),
+      await q('select count(*)::int as n from person'),
+    ]);
+  };
+
+  /** Calls every session-bound function with this hash as ams_app and expects each to raise 28000 and change nothing. */
+  async function expectRefused(tokenHash: string) {
+    const before = await snapshot();
+    const app = await c.f.appClient();
+    try {
+      const calls: [string, unknown[]][] = [
+        ['select * from platform_list_firms($1)', [tokenHash]],
+        ['select * from platform_audit_list($1)', [tokenHash]],
+        ['select * from platform_create_firm($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+          [tokenHash, 'Rogue Studio', 'Rogue Studio LLP', 'Asia/Kolkata', 'INR', 'Rogue Owner', 'rogue@rogue.example', hashToken('rogue-invite'), FUTURE()]],
+        ['select platform_set_firm_status($1, $2, $3, $4)', [tokenHash, c.f.firmId, 'Suspended', 'No session']],
+      ];
+      for (const [sql, params] of calls) {
+        await expect(app.query(sql, params)).rejects.toMatchObject({ code: '28000' });
+      }
+    } finally {
+      await app.end();
+    }
+    expect(await snapshot()).toBe(before);
+    expect((await c.f.owner.query('select status from firm where id = $1', [c.f.firmId])).rows[0].status).toBe('Active');
+    expect((await c.f.owner.query(`select 1 from firm where trading_name = 'Rogue Studio'`)).rowCount).toBe(0);
+  }
+
+  it('a made-up token is refused by every platform action and changes nothing', async () => {
+    await expectRefused(made);
+  });
+
+  it('a firm user session token is refused by every platform action', async () => {
+    const firmToken = await c.f.login('P01');
+    await expectRefused(hashToken(firmToken));
+  });
+
+  it('a revoked platform session is refused', async () => {
+    const r = await platformLogin(c.f, PLATFORM_DEMO_EMAIL, PLATFORM_DEMO_PASSWORD);
+    const token = r.cookies.find((x) => x.name === 'ams_platform')!.value;
+    const app = await c.f.appClient();
+    try {
+      // While live, the same direct call works.
+      expect((await app.query('select * from platform_list_firms($1)', [hashToken(token)])).rowCount).toBeGreaterThan(0);
+    } finally {
+      await app.end();
+    }
+    expect((await asAdmin(c.f, token, 'POST', '/auth/logout')).status).toBe(200);
+    await expectRefused(hashToken(token));
+  });
+
+  it('an expired platform session is refused', async () => {
+    const token = 'expired-platform-session-token';
+    const adminId = (await c.f.owner.query('select id from platform_admin where email = $1', [PLATFORM_DEMO_EMAIL])).rows[0].id;
+    await c.f.owner.query(`insert into platform_session (admin_id, token_hash, expires_at) values ($1, $2, now() - interval '1 minute')`, [adminId, hashToken(token)]);
+    await expectRefused(hashToken(token));
+    expect((await asAdmin(c.f, token, 'GET', '/firms')).status).toBe(401);
+  });
+
+  it('the old admin-id and no-identity signatures no longer exist', async () => {
+    const old = [
+      'platform_find_admin(text)',
+      'platform_list_firms()',
+      'platform_audit_list()',
+      'platform_create_firm(text,text,text,text,text,text,text,timestamptz,uuid)',
+      'platform_set_firm_status(uuid,text,text,uuid)',
+    ];
+    for (const sig of old) {
+      expect((await c.f.owner.query('select to_regprocedure($1) as p', [sig])).rows[0].p, sig).toBeNull();
+    }
+    for (const sig of ['platform_list_firms(text)', 'platform_audit_list(text)', 'platform_auth_lookup(text)',
+      'platform_create_firm(text,text,text,text,text,text,text,text,timestamptz)', 'platform_set_firm_status(text,uuid,text,text)']) {
+      expect((await c.f.owner.query('select to_regprocedure($1) as p', [sig])).rows[0].p, sig).not.toBeNull();
+    }
+  });
+
+  it('only platform_create_session takes an admin id, and the session resolver is not callable by ams_app', async () => {
+    const withAdminArg = (await c.f.owner.query(`
+      select p.oid::regprocedure::text as sig from pg_proc p
+      where p.proname like 'platform%' and 'uuid'::regtype::oid = any(p.proargtypes::oid[])
+        and exists (select 1 from unnest(p.proargnames) n where n like '%admin%')`)).rows.map((r) => r.sig);
+    expect(withAdminArg).toEqual(['platform_create_session(uuid,text,timestamp with time zone)']);
+    const app = await c.f.appClient();
+    try {
+      await expect(app.query('select platform_session_admin($1)', [made])).rejects.toThrow(/permission denied/);
+    } finally {
+      await app.end();
+    }
+  });
+
+  it('no platform function except platform_auth_lookup returns password_hash, and that one returns only the id and the hash', async () => {
+    const rows = (await c.f.owner.query(`
+      select p.proname, array_agg(a.name::text order by a.ord) as outs
+      from pg_proc p
+      cross join lateral unnest(p.proargnames, p.proargmodes::text[]) with ordinality as a(name, mode, ord)
+      where p.proname like 'platform%' and a.mode in ('o', 't', 'b')
+      group by p.proname`)).rows as { proname: string; outs: string[] }[];
+    const withHash = rows.filter((r) => r.outs.some((n) => /password/i.test(n))).map((r) => r.proname);
+    expect(withHash).toEqual(['platform_auth_lookup']);
+    expect(rows.find((r) => r.proname === 'platform_auth_lookup')!.outs).toEqual(['admin_id', 'password_hash']);
+    const executable = (await c.f.owner.query(`
+      select p.proname from pg_proc p where p.proname like 'platform%' and has_function_privilege('ams_app', p.oid, 'execute') order by 1`)).rows.map((r) => r.proname);
+    expect(executable).toEqual(['platform_audit_list', 'platform_auth_lookup', 'platform_create_firm', 'platform_create_session',
+      'platform_find_session', 'platform_list_firms', 'platform_revoke_session', 'platform_set_firm_status']);
+  });
+
+  it('platform_create_session writes the login audit row and refuses a session longer than 12 hours', async () => {
+    const app = await c.f.appClient();
+    try {
+      const adminId = (await app.query('select admin_id from platform_auth_lookup($1)', [PLATFORM_DEMO_EMAIL])).rows[0].admin_id;
+      const count = async () => (await c.f.owner.query(`select count(*)::int as n from platform_audit where action = 'login' and admin_id = $1`, [adminId])).rows[0].n;
+      const before = await count();
+      await app.query('select platform_create_session($1, $2, $3)', [adminId, hashToken('direct-session'), FUTURE()]);
+      expect(await count()).toBe(before + 1);
+      await expect(app.query('select platform_create_session($1, $2, $3)', [adminId, hashToken('long-session'), new Date(Date.now() + 13 * 3600_000)]))
+        .rejects.toMatchObject({ code: 'P0001' });
+      await expect(app.query('select platform_create_session($1, $2, $3)', ['00000000-0000-4000-8000-000000000000', hashToken('ghost-session'), FUTURE()]))
+        .rejects.toMatchObject({ code: '28000' });
+      expect(await count()).toBe(before + 1);
     } finally {
       await app.end();
     }

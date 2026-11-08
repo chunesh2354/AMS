@@ -18,7 +18,7 @@ This is a working core path, not a finished product.
 | `apps/api` | Fastify + `pg` API. `src/app.ts` (hooks, error handler), `src/auth/` (actor, `authorize`, redaction, sessions), `src/db/pool.ts` (`withFirm`), `src/http/`, `src/config/env.ts`, `src/modules/<area>/*.routes.ts`, `src/dev/*.ts` (embedded Postgres, migrate, seed, platform admin), `test/*.test.ts` against real Postgres |
 | `apps/web` | React UI (Vite). `src/api/*` mock layer, `src/api/live.ts` + `src/api/live/*.ts` live layer, `tests/` Playwright (mock), `tests-live/` Playwright (live) |
 | `packages/domain` | Pure rules: money in paise, capability levels, state machines, NTE split. Imported by relative path |
-| `packages/db/migrations` | Versioned SQL migrations (`001_core_path.sql`, `002_accounts_platform.sql`), applied in order by `apps/api/src/dev/db.ts` |
+| `packages/db/migrations` | Versioned SQL migrations (`001_core_path.sql`, `002_accounts_platform.sql`, `003_platform_session_binding.sql`), applied in order by `apps/api/src/dev/db.ts` |
 | `docs` | Product, engineering and design docs. Start at [docs/README.md](docs/README.md) |
 
 ## Prerequisites

@@ -1,7 +1,10 @@
 import { Tooltip } from '../Tooltip';
 
 export const initials = (name: string) => {
-  const parts = name.trim().split(/\s+/);
+  // Skip words that start with punctuation, such as the "(DEMO)" suffix, so they never become "P(".
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const named = words.filter((w) => /^[\p{L}\p{N}]/u.test(w));
+  const parts = named.length ? named : words;
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] ?? '')).toUpperCase();
 };
 

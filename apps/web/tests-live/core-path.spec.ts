@@ -1,7 +1,18 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
 
 const PASSWORD = 'meridian-demo-2026';
+const NEW_PASSWORD = 'studio-invite-2026';
 const shot = (page: Page, name: string) => page.screenshot({ path: `../../docs/ui-screens/live-${name}.png`, fullPage: true });
+const dark = async (page: Page, name: string) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  // Controls animate their colours; capture only once every theme transition has finished.
+  await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState === 'finished'));
+  await shot(page, `${name}-dark`);
+  await page.emulateMedia({ colorScheme: 'light' });
+};
+// Unique per run so the suite can rerun against a reused database.
+const RUN = String(process.env.E2E_RUN ?? Date.now().toString(36));
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function login(page: Page, who: string, password = PASSWORD) {
   await page.goto('/login');
@@ -9,6 +20,20 @@ async function login(page: Page, who: string, password = PASSWORD) {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   if (password === PASSWORD) await page.waitForURL((u) => !u.pathname.startsWith('/login'));
+}
+
+/** Opens an invite link in a clean browser context and sets a password. Returns the page, signed in. */
+async function acceptInvite(browser: Browser, url: string, shotName?: string) {
+  const ctx = await browser.newContext({ baseURL: 'http://localhost:4273' });
+  const page = await ctx.newPage();
+  await page.goto(url);
+  await expect(page.getByRole('heading', { name: /^Join / })).toBeVisible();
+  if (shotName) await shot(page, `${shotName}-light`);
+  await page.getByLabel('Password', { exact: true }).fill(NEW_PASSWORD);
+  await page.getByLabel('Confirm password').fill(NEW_PASSWORD);
+  await page.getByRole('button', { name: 'Set password and sign in' }).click();
+  await page.waitForURL((u) => !u.pathname.startsWith('/accept-invite'));
+  return { ctx, page };
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -58,6 +83,142 @@ test('2a. PM sees approvals; PRJ-01 contribution restricted', async ({ page }) =
   await page.goto('/firm/approvals');
   await shot(page, 'approvals');
   await page.goto('/firm/projects/PRJ-01');
-  await expect(page.getByText('Restricted').first()).toBeVisible();
+  // RestrictedCell is a lock icon with an accessible name, not visible text.
+  await expect(page.getByRole('img', { name: /^restricted, requires finance permission/ }).first()).toBeVisible();
   await shot(page, 'project-restricted');
+});
+
+const FINANCE_NAME = `Test Finance ${RUN}`;
+// The server's messages. For the only principal, the last-principal rule answers first (pinned in apps/api/test/accounts.test.ts).
+const REFUSALS: [string, string][] = [
+  ['Asha Rao', 'The last principal cannot lose principal or access until another is assigned.'],
+  [FINANCE_NAME, 'Only a principal can deactivate a principal or finance account.'],
+];
+
+async function addAccount(page: Page, name: string, email: string, types: { check?: RegExp[]; uncheck?: RegExp[] } = {}) {
+  await page.getByRole('button', { name: 'Add account' }).first().click();
+  await page.getByLabel('Full name').fill(name);
+  await page.getByLabel('Work email').fill(email);
+  await page.getByLabel('Job title').fill('Architect');
+  for (const t of types.check ?? []) await page.getByRole('checkbox', { name: t }).check();
+  for (const t of types.uncheck ?? []) await page.getByRole('checkbox', { name: t }).uncheck();
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page.getByText('Account created')).toBeVisible();
+  await expect(page.getByText('Email delivery is not connected yet. Send this link yourself.')).toBeVisible();
+  const url = await page.getByLabel('Invite link').inputValue();
+  expect(url).toContain('/accept-invite/');
+  return url;
+}
+
+async function firmLogin(browser: Browser, email: string, password: string) {
+  const ctx = await browser.newContext({ baseURL: 'http://localhost:4273' });
+  const page = await ctx.newPage();
+  await page.goto('/login');
+  await page.getByLabel('Work email').fill(email);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  return { ctx, page };
+}
+
+test('7. principal adds an employee; the invite sets a password and signs in', async ({ page, browser }) => {
+  await page.goto('/login');
+  await shot(page, 'login-light');
+  await login(page, 'p01');
+  await page.goto('/firm/settings/accounts');
+  await expect(page.getByRole('heading', { name: 'Accounts' })).toBeVisible();
+  await expect(page.getByText('Asha Rao').first()).toBeVisible();
+  await shot(page, 'accounts-light');
+  await dark(page, 'accounts');
+
+  const email = `e2e.employee.${RUN}@meridian.demo`;
+  const url = await addAccount(page, 'Test Employee', email);
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  const invited = await acceptInvite(browser, url, 'accept-invite');
+  await expect(invited.page).toHaveURL(/\/me\/home/);
+  await expect(invited.page.getByRole('navigation').getByText('Firm', { exact: true })).toHaveCount(0);
+  await invited.ctx.close();
+
+  await page.reload();
+  await expect(page.getByRole('row', { name: new RegExp(esc(email)) }).getByText('Accepted')).toBeVisible();
+
+  // A finance account for test 8 to try to deactivate.
+  await addAccount(page, FINANCE_NAME, `e2e.finance.${RUN}@meridian.demo`, { check: [/^Finance/], uncheck: [/^Employee/] });
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('row', { name: new RegExp(esc(FINANCE_NAME)) }).getByText('Finance', { exact: true })).toBeVisible();
+});
+
+test('8. operations cannot deactivate principal or finance accounts and sees the server message', async ({ page }) => {
+  await login(page, 'p10');
+  await page.goto('/firm/settings/accounts');
+  for (const [name, message] of REFUSALS) {
+    await page.getByRole('button', { name: `Actions for ${name}` }).click();
+    await page.getByRole('menuitem', { name: 'Deactivate' }).click();
+    await page.getByLabel('Reason').fill('End-to-end check that this is refused');
+    await page.getByRole('button', { name: 'Deactivate', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Deactivate account' }).getByRole('alert')).toHaveText(message);
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.reload();
+    await expect(page.getByRole('row', { name: new RegExp(esc(name)) }).getByText('Revoked')).toHaveCount(0);
+  }
+  // The principal can still sign in.
+  const check = await page.request.post('/api/v1/auth/login', { data: { email: 'p01@meridian.demo', password: PASSWORD } });
+  expect(check.ok()).toBeTruthy();
+});
+
+test('9. platform admin adds, suspends and reactivates a company, and sees counts only', async ({ page, browser }) => {
+  await page.goto('/platform/login');
+  await page.getByLabel('Email').fill('admin@platform.demo');
+  await page.getByLabel('Password').fill('platform-demo-2026');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.waitForURL((u) => u.pathname === '/platform');
+  await expect(page.getByRole('table', { name: 'Companies' }).or(page.getByRole('region', { name: 'Companies' })).first()).toBeVisible();
+  await expect(page.getByText('Studio Meridian').first()).toBeVisible();
+  const text = await page.locator('body').innerText();
+  for (const leak of ['PRJ-0', 'INV-DEMO', '₹', 'Asha Rao', 'Vikram Nair', 'Rohan Shetty', 'Farah Khan', 'Lakeview'])
+    expect(text, `platform page leaks ${leak}`).not.toContain(leak);
+  await shot(page, 'platform-light');
+  await dark(page, 'platform');
+
+  const company = `E2E Studio ${RUN}`;
+  const owner = `owner.${RUN}@e2e-studio.demo`;
+  await page.getByRole('button', { name: 'Add company' }).first().click();
+  await page.getByLabel('Trading name').fill(company);
+  await page.getByLabel('Legal name').fill(`${company} LLP`);
+  await page.getByLabel('Owner name').fill('Test Owner');
+  await page.getByLabel('Owner email').fill(owner);
+  await page.getByRole('button', { name: 'Create company' }).click();
+  await expect(page.getByText(`${company} is ready.`)).toBeVisible();
+  const url = await page.getByLabel('Invite link').inputValue();
+  expect(url).toContain('/accept-invite/');
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  const ownerSession = await acceptInvite(browser, url);
+  await expect(ownerSession.page).not.toHaveURL(/\/login/);
+  await ownerSession.ctx.close();
+
+  const row = () => page.getByRole('row', { name: new RegExp(esc(company)) });
+  await page.getByRole('button', { name: `Actions for ${company}` }).click();
+  await page.getByRole('menuitem', { name: 'Suspend' }).click();
+  await page.getByLabel('Reason').fill('End-to-end suspension check');
+  await page.getByRole('button', { name: 'Suspend company' }).click();
+  await expect(row().getByText('Suspended')).toBeVisible();
+
+  // Suspended: the owner cannot sign in to the firm app.
+  const refused = await firmLogin(browser, owner, NEW_PASSWORD);
+  await expect(refused.page.getByRole('alert')).toBeVisible();
+  await expect(refused.page).toHaveURL(/\/login/);
+  await refused.ctx.close();
+
+  await page.getByRole('button', { name: `Actions for ${company}` }).click();
+  await page.getByRole('menuitem', { name: 'Reactivate' }).click();
+  const reason = page.getByLabel('Reason');
+  if (await reason.count()) await reason.fill('End-to-end reactivation check');
+  await page.getByRole('button', { name: 'Reactivate company' }).click();
+  await expect(row().getByText('Active')).toBeVisible();
+
+  // Active again: the owner signs in.
+  const allowed = await firmLogin(browser, owner, NEW_PASSWORD);
+  await allowed.page.waitForURL((u) => !u.pathname.startsWith('/login'));
+  await allowed.ctx.close();
 });

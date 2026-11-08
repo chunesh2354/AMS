@@ -121,6 +121,8 @@ export function ProjectPhasesScreen() {
   const overrun = phases.find((p) => forecast(p) > p.budget);
   const columns: Column<Phase>[] = [
     { key: 'name', header: 'Phase', value: (p) => p.name, render: (p) => <span style={{ whiteSpace: 'nowrap' }}>{p.name}</span> },
+    // Status sits next to the name so it stays in view when the hours columns overflow at 1440.
+    { key: 'status', header: 'Status', type: 'status', value: (p) => p.status },
     { key: 'dates', header: 'Dates', value: (p) => p.start, render: (p) => <span className="stacked t-numeric"><span>{formatDate(p.start)}</span><span className="ink-2">{formatDate(p.end)}</span></span> },
     { key: 'owner', header: 'Owner', value: (p) => personName(p.ownerId), render: (p) => <Tooltip text={personName(p.ownerId)}><span tabIndex={0} className="tip-target"><Avatar name={personName(p.ownerId)} size={28} /></span></Tooltip> },
     { key: 'budget', header: 'Budget (h)', type: 'number', value: (p) => p.budget, total: (r) => r.reduce((s, x) => s + x.budget, 0) },
@@ -133,7 +135,6 @@ export function ProjectPhasesScreen() {
     },
     { key: 'delivery', header: 'Delivery', type: 'number', value: (p) => p.delivery, render: (p) => formatPercent(p.delivery) },
     { key: 'fee', header: 'Fee allocation', type: 'money', value: (p) => p.fee, render: (p) => formatINR(p.fee), total: (r) => r.reduce((s, x) => s + x.fee, 0) },
-    { key: 'status', header: 'Status', type: 'status', value: (p) => p.status },
   ];
   const tableState = state === 'ready' && !phases.length ? 'empty' : state;
   return (
