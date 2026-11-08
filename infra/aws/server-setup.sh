@@ -97,6 +97,7 @@ sed "s|{\$AMS_DOMAIN}|${AMS_DOMAIN}|g" "$APP_DIR/infra/aws/Caddyfile" > /etc/cad
 install -m 755 "$APP_DIR/infra/aws/backup.sh" /usr/local/bin/ams-backup
 install -m 755 "$APP_DIR/infra/aws/deploy.sh" /usr/local/bin/ams-deploy
 install -m 755 "$APP_DIR/infra/aws/create-platform-admin.sh" /usr/local/bin/ams-create-platform-admin
+install -m 755 "$APP_DIR/infra/aws/set-platform-admin-password.sh" /usr/local/bin/ams-set-platform-admin-password
 cat > /etc/cron.d/ams-backup <<'EOF'
 # Nightly database backup to S3 at 02:30 server time (UTC).
 30 2 * * * root /usr/local/bin/ams-backup >> /var/log/ams-backup.log 2>&1

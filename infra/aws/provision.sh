@@ -39,7 +39,7 @@ aws_ iam put-role-policy --role-name "$ROLE" --policy-name ams-server --policy-d
   \"Version\":\"2012-10-17\",
   \"Statement\":[
     {\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::${BUCKET}/db/*\"},
-    {\"Effect\":\"Allow\",\"Action\":[\"ssm:PutParameter\"],\"Resource\":\"arn:aws:ssm:${AWS_REGION}:${ACCOUNT}:parameter/ams/*\"}
+    {\"Effect\":\"Allow\",\"Action\":[\"ssm:PutParameter\",\"ssm:GetParameter\"],\"Resource\":\"arn:aws:ssm:${AWS_REGION}:${ACCOUNT}:parameter/ams/*\"}
   ]}"
 if ! aws_ iam get-instance-profile --instance-profile-name "$ROLE" >/dev/null 2>&1; then
   aws_ iam create-instance-profile --instance-profile-name "$ROLE" --tags "$TAGS" >/dev/null
