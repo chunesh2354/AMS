@@ -1,0 +1,23 @@
+[Unit]
+Description=AMS API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+User=ams
+Group=ams
+WorkingDirectory=/opt/ams/apps/api
+EnvironmentFile=/etc/ams/env
+ExecStart=/usr/bin/node --import tsx src/main.ts
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/opt/ams/apps/api
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target
