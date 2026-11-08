@@ -38,6 +38,9 @@ function groupNotifications(rows: LiveNotification[], now = new Date()): Notific
   ].filter((g) => g.items.length > 0);
 }
 
+const PHONE_BANNER_KEY = 'phone-banner-dismissed';
+const PHONE_OK_ROUTES = ['/firm/overview', '/firm/approvals'];
+const readBannerDismissed = () => { try { return localStorage.getItem(PHONE_BANNER_KEY) === '1'; } catch { return false; } };
 const isConnectedRoute = (pathname: string) => CONNECTED_ROUTES.some((path) => matchPath({ path, end: true }, pathname));
 
 /** Real shell around both route trees: navigation, top bar, palette, notifications and the mock view-as switch. */
@@ -58,6 +61,8 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
 
   const narrow = useMediaQuery('(max-width: 1279px)');
   const phone = useMediaQuery('(max-width: 767px)');
+  const [bannerDismissed, setBannerDismissed] = useState(readBannerDismissed);
+  const dismissBanner = () => { setBannerDismissed(true); try { localStorage.setItem(PHONE_BANNER_KEY, '1'); } catch { /* storage blocked: dismissal lasts this visit */ } };
   const collapsed = narrow || collapsedByUser;
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
@@ -118,8 +123,8 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
   const tabs = iface === 'firm' && firmAllowed ? firmTabs(navigate) : teamTabs(navigate);
   const showFirmNav = iface === 'firm' && firmAllowed;
   const sampleBanner = isLive && !isConnectedRoute(pathname) ? <InlineAlert variant="warn" title={SAMPLE_DATA_NOTICE} /> : undefined;
-  const phoneBanner = phone && showFirmNav
-    ? <InlineAlert variant="info" title="Best on a larger screen" dismissible>Overview and Approvals work here. Everything else is easier on a bigger display.</InlineAlert>
+  const phoneBanner = phone && showFirmNav && !bannerDismissed && !PHONE_OK_ROUTES.some((path) => matchPath({ path, end: false }, pathname))
+    ? <InlineAlert variant="info" title="Best on a larger screen" dismissible onDismiss={dismissBanner}>Overview and Approvals work here. Everything else is easier on a bigger display.</InlineAlert>
     : undefined;
 
   return (

@@ -23,7 +23,7 @@ import { formatDate, formatGrouped, formatINR, formatPercent } from '../../../ui
 import { GoTo } from '../../shared/go-to';
 
 const forecast = (p: Phase) => p.actual + p.etc;
-const signed = (v: number) => (v > 0 ? `+${formatGrouped(v)}` : formatGrouped(v));
+const signed = (v: number) => (v > 0 ? `+${formatGrouped(v)}` : v < 0 ? `−${formatGrouped(-v)}` : formatGrouped(v));
 
 function BudgetRevisionSheet({ phases, open, onClose, initial }: { phases: Phase[]; open: boolean; onClose: () => void; initial: string | null }) {
   const toast = useToast();
@@ -128,8 +128,8 @@ export function ProjectPhasesScreen() {
     { key: 'etc', header: 'ETC (h)', type: 'number', value: (p) => p.etc, total: (r) => r.reduce((s, x) => s + x.etc, 0) },
     { key: 'forecast', header: 'Forecast (h)', type: 'number', value: forecast, total: (r) => r.reduce((s, x) => s + forecast(x), 0) },
     {
-      key: 'variance', header: 'Var. (h)', type: 'number', value: (p) => forecast(p) - p.budget,
-      render: (p) => { const v = forecast(p) - p.budget; return <span className={v > 0 ? 'err-cell' : undefined}>{signed(v)}</span>; },
+      key: 'variance', header: 'Over / under (h)', type: 'number', value: (p) => forecast(p) - p.budget,
+      render: (p) => { const v = forecast(p) - p.budget; return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{signed(v)}</span>; },
     },
     { key: 'delivery', header: 'Delivery', type: 'number', value: (p) => p.delivery, render: (p) => formatPercent(p.delivery) },
     { key: 'fee', header: 'Fee allocation', type: 'money', value: (p) => p.fee, render: (p) => formatINR(p.fee), total: (r) => r.reduce((s, x) => s + x.fee, 0) },

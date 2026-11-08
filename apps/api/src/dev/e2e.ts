@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appUrl, startDevDb } from './db';
-import { buildApp } from '../server';
+import { buildApp } from '../app';
 
 // Throwaway database for the live browser tests: fresh dir, migrate, seed, serve on 3001.
 const PORT = Number(process.env.AMS_E2E_DB_PORT ?? 54332);

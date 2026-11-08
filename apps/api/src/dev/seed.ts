@@ -1,6 +1,6 @@
 import { hash } from '@node-rs/argon2';
 import pg from 'pg';
-import { addDays, weekStart } from '../../../../packages/domain/src/index';
+import { addDays, weekStart } from '@ams/domain';
 
 /** Section 15. Sample values only, never defaults. Idempotent by firm name. Refuses to run in production. */
 export const DEMO_PASSWORD = 'meridian-demo-2026';

@@ -1,6 +1,8 @@
-import { audit, authorize, list } from '../core';
-import { adapterFor } from './accounting';
-import type { Api } from '../server';
+import { audit } from '../../audit/audit';
+import { authorize } from '../../auth/authorize';
+import { list } from '../../http/responses';
+import { adapterFor } from './adapters/accounting';
+import type { Api } from '../../http/api';
 
 export function integrationRoutes({ get, put }: Api) {
   get('/integrations', async ({ tx, actor }) => {

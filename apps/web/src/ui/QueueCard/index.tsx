@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { ChevronRight, TrendingDown, TrendingUp } from 'lucide-react';
 import { RestrictedCell } from '../RestrictedCell';
 import { formatGrouped } from '../format';
 import type { Tone } from '../status-colors';
@@ -24,10 +24,10 @@ export function QueueCard({ count, label, severity = 'neutral', trend, restricte
           </span>
         )}
       </span>
-      <span className="queue__label">{label}</span>
+      <span className="queue__label">{label}{onClick && !restricted && <ChevronRight className="queue__chevron" size={16} strokeWidth={1.5} aria-hidden />}</span>
     </>
   );
   const cls = `queue glass tone-${severity}`;
   // A restricted card holds its own focusable lock, so it cannot also be a button.
-  return onClick && !restricted ? <button type="button" className={cls} onClick={onClick}>{body}</button> : <div className={cls}>{body}</div>;
+  return onClick && !restricted ? <button type="button" className={cls} onClick={onClick} aria-label={`${formatGrouped(count)} ${label}, open list`}>{body}</button> : <div className={cls}>{body}</div>;
 }

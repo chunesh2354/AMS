@@ -24,7 +24,7 @@ export function TaskRow({ title, where, due, priority, status, reviewer, onOpen,
         <span className="t-caption ink-2">{where} · <span className="taskline__due">{formatDate(due)}</span></span>
       </button>
       <span className="taskline__meta">
-        <StatusChip dot status={priority} label={`${priority} priority`} />
+        <span className="t-caption ink-2" role="img" aria-label={`${priority} priority`}>{priority}</span>
         {reviewer && <Avatar name={reviewer} size={20} />}
         <StatusChip size="sm" status={status} />
       </span>

@@ -28,13 +28,12 @@ export function TimerPill({ state, elapsedSeconds = 0, context, onStart, onStop 
       type="button"
       className={cx('timer', warn && 'timer--warn')}
       onClick={onStop}
+      aria-label={`Stop timer, ${elapsed}${context ? `, ${context}` : ''}${warn ? ', running over 10 hours' : ''}`}
     >
-      <span className="sr-only">Stop timer, </span>
       <span className="timer__dot" aria-hidden />
       <span className="timer__elapsed">{elapsed}</span>
       {context && <span className="timer__context">{context}</span>}
-      <Square size={16} strokeWidth={1.5} aria-hidden />
-      {warn && <span className="sr-only">, running over 10 hours</span>}
+      <span className="timer__stop" aria-hidden><Square size={12} strokeWidth={1.5} fill="currentColor" />Stop</span>
     </button>
   );
 }

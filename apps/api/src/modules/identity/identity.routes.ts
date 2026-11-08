@@ -1,7 +1,14 @@
 import { hash, verify } from '@node-rs/argon2';
-import { isSensitiveCapability, isSensitiveSet, type PermissionSetKey, PERMISSION_SETS } from '../../../../packages/domain/src/index';
-import { ApiError, audit, authorize, can, hashToken, list, money, newToken, notFound, required, ruleError, uuidParam, withFirm } from '../core';
-import { SESSION_COOKIE, type Api } from '../server';
+import { isSensitiveCapability, isSensitiveSet, type PermissionSetKey, PERMISSION_SETS } from '@ams/domain';
+import { ApiError, notFound, ruleError } from '../../http/errors';
+import { audit } from '../../audit/audit';
+import { authorize, can } from '../../auth/authorize';
+import { hashToken, newToken } from '../../auth/sessions';
+import { list, money } from '../../http/responses';
+import { required, uuidParam } from '../../http/validation';
+import { withFirm } from '../../db/pool';
+import { SESSION_COOKIE } from '../../auth/sessions';
+import type { Api } from '../../http/api';
 
 const SESSION_DAYS = 14;
 const DUMMY_HASH = hash('not-a-real-password');

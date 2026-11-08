@@ -65,6 +65,7 @@ a.sidenav__item.active svg { color: var(--accent-text); }
 .notif__time { color: var(--ink-2); font: var(--text-numeric); font-size: 12px; }
 
 /* TimerPill */
+.timer__stop { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 24px; min-width: 24px; font: var(--text-caption); color: var(--ink-2); }
 .timer { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-control); max-width: 100%; padding: 0 var(--s-3); border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--line-strong); font: var(--text-body-sm); white-space: nowrap; }
 .timer__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok-ink); flex: none; animation: timer-pulse 2s ease-out infinite; }
 .timer__elapsed { font: var(--text-timer); }
@@ -102,7 +103,7 @@ a.sidenav__item.active svg { color: var(--accent-text); }
 @media (max-width: 1023px) { .sheet, .sheet--640 { width: 100%; } }
 .sheet__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); padding: var(--s-6) var(--s-6) var(--s-4); }
 .sheet__desc { margin-top: var(--s-1); color: var(--ink-2); font: var(--text-body-sm); }
-.sheet__body { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--s-6) var(--s-6); }
+.sheet__body { flex: 1; min-height: 0; overflow: auto; padding: var(--s-4) var(--s-6) var(--s-6); background: var(--surface); border-top: 1px solid var(--line); scroll-padding-bottom: 72px; }
 .sheet__foot { flex: none; min-height: var(--sheet-footer); display: flex; align-items: center; justify-content: flex-end; gap: var(--s-2); padding: var(--s-3) var(--s-6); border-top: 1px solid var(--line); }
 .sheet__confirm { margin-right: auto; font: var(--text-body-sm); }
 

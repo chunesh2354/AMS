@@ -8,7 +8,8 @@
     "start": "tsx src/dev/start.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "reset": "tsx src/dev/reset.ts"
+    "reset": "tsx src/dev/reset.ts",
+    "platform-admin": "tsx src/dev/platform-admin.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

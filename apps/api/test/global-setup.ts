@@ -5,6 +5,7 @@ import EmbeddedPostgres from 'embedded-postgres';
 import pg from 'pg';
 import { migrate, ownerUrl } from '../src/dev/db';
 import { seed } from '../src/dev/seed';
+import { seedPlatformAdmin } from '../src/dev/platform-admin';
 
 const PORT = 54331;
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.pgtest');
@@ -19,6 +20,7 @@ export default async function setup() {
     const url = ownerUrl(PORT, 'ams_template');
     await migrate(url);
     await seed(url, { today: '2026-11-06' });
+    await seedPlatformAdmin(url);
     const admin = new pg.Client({ connectionString: ownerUrl(PORT, 'postgres') });
     await admin.connect();
     await admin.query(`select pg_terminate_backend(pid) from pg_stat_activity where datname = 'ams_template' and pid <> pg_backend_pid()`);

@@ -16,6 +16,7 @@ import { PersonPicker } from '../../ui/PersonPicker';
 import { PreviewPane } from '../../ui/PreviewPane';
 import { QueueRail } from '../../ui/QueueRail';
 import { Sheet } from '../../ui/Sheet';
+import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { useMediaQuery } from '../../ui/useMediaQuery';
 import { GoTo } from '../shared/go-to';
@@ -25,8 +26,23 @@ const loadDelegates = async (): Promise<DelegateOption[]> =>
 
 const QUEUES: ('All' | ApprovalType)[] = ['All', 'Time', 'Leave', 'Expenses', 'Bills', 'Changes', 'Billing drafts'];
 
-function Preview({ item, onApprove, onDelegate }: { item: Approval | null; onApprove: (a: Approval) => void; onDelegate: (a: Approval) => void }) {
-  if (!item) return <PreviewPane state="empty" />;
+const amountLabel = (t: ApprovalType) => (t === 'Time' || t === 'Leave' || t === 'Changes' ? 'Hours' : 'Amount');
+
+type PreviewProps = { item: Approval | null; onApprove: (a: Approval) => void; onReturn: (a: Approval, reason: string) => void; onDelegate: (a: Approval) => void };
+
+function Preview(props: PreviewProps) {
+  if (!props.item) return <PreviewPane state="empty" />;
+  return <PreviewBody key={props.item.id} {...props} item={props.item} />;
+}
+
+function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & { item: Approval }) {
+  const [returning, setReturning] = useState(false);
+  const [reason, setReason] = useState('');
+  const [tried, setTried] = useState(false);
+  const sendReturn = () => {
+    if (!reason.trim()) { setTried(true); return; }
+    onReturn(item, reason.trim());
+  };
   return (
     <PreviewPane
       eyebrow={item.type}
@@ -34,14 +50,23 @@ function Preview({ item, onApprove, onDelegate }: { item: Approval | null; onApp
       fields={[
         { label: 'Project', value: item.project },
         { label: 'Period', value: item.period },
-        { label: 'Amount or h', value: item.amount, mono: true },
+        { label: amountLabel(item.type), value: item.amount, mono: true },
         { label: 'Approver', value: item.approver },
         { label: 'Waiting', value: `${item.ageDays} d`, mono: true },
       ]}
       alert={item.exception && <InlineAlert variant="warn" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}This item needs its own decision and stays out of batch approval.</InlineAlert>}
       evidence={item.evidence}
       history={item.history}
-      actions={<><Button variant="primary" onClick={() => onApprove(item)}>Approve</Button><Button onClick={() => onDelegate(item)}>Delegate</Button></>}
+      actions={returning
+        ? <div className="apr__return">
+            <TextField
+              dense autoFocus label="Reason the submitter will see" value={reason} placeholder="What needs to change"
+              error={tried && !reason.trim() ? 'A reason is required' : undefined} onChange={(e) => setReason(e.target.value)}
+            />
+            <Button variant="primary" onClick={sendReturn}>Send return</Button>
+            <Button variant="ghost" onClick={() => { setReturning(false); setTried(false); }}>Cancel</Button>
+          </div>
+        : <><Button variant="primary" onClick={() => onApprove(item)}>Approve</Button><Button onClick={() => setReturning(true)}>Return</Button><Button variant="ghost" onClick={() => onDelegate(item)}>Delegate</Button></>}
     />
   );
 }
@@ -162,11 +187,11 @@ export function ApprovalsScreen() {
               </ul>
             </section>
           )}
-        {wide && <Preview item={effective === 'ready' ? active : null} onApprove={approve} onDelegate={startDelegate} />}
+        {wide && <Preview item={effective === 'ready' ? active : null} onApprove={approve} onReturn={returnItem} onDelegate={startDelegate} />}
       </div>
       {!wide && (
         <Sheet open={sheetPreview && !!active} onClose={() => setSheetPreview(false)} title={active?.submitter ?? 'Preview'} description={active?.type}>
-          <Preview item={active} onApprove={approve} onDelegate={startDelegate} />
+          <Preview item={active} onApprove={approve} onReturn={returnItem} onDelegate={startDelegate} />
         </Sheet>
       )}
       <Sheet

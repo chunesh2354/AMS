@@ -68,6 +68,20 @@ These items are UI-only, small, low risk and inside the brief. Strings that test
 | UX-23 | 24×24 hit areas on Checkbox and PeriodNav. Decorative planner glyph. | `apps/web/src/ui/Checkbox/index.tsx`, `apps/web/src/ui/PeriodNav/index.tsx`, `apps/web/src/ui/PlannerGrid/index.tsx` |
 | UX-25 | Scope and remember the larger-screen banner. | `apps/web/src/layouts/ShellLayout.tsx` (currently being edited by another agent, so coordinate) |
 
+### Status (applied 08 Nov 2026, apps/web/src only)
+
+- **UX-03 (Return part): applied.** The preview footer now reads Approve (primary), Return (secondary, opens an inline "Reason the submitter will see" field with Send return and Cancel), Delegate (ghost). "Amount or h" now reads "Hours" for Time, Leave and Changes items and "Amount" for everything else. The hours strip is not done (it was outside this item).
+- **UX-05: partly applied.** QueueCard has a trailing chevron in `--ink-3` that turns `--accent` on hover or focus, a `--line-strong` hover border, and `aria-label="<count> <label>, open list"`. The label keeps its original case, because existing tests match `/14\s*Pending approvals/`. The AttentionList caption now reads "Sorted by severity, then age". **Skipped:** the verb button on each row, because rows are already links and the type-to-verb targets (send reminder, raise change and so on) have no routes yet.
+- **UX-08: partly applied.** On Phases and Project overview, the header reads "Over / under (h)", negatives use a true minus (U+2212) in `--ink-2`, and positives keep "+" in the danger style. The explanation "Forecast minus budget. Positive is over budget." is a native `title` on each cell, not a `Tooltip` on the header, because `DataTable` headers only accept strings. **Skipped:** Costs, which has no variance column.
+- **UX-09: applied.** `.sheet__body` sits on `--surface` with a `--line` top rule. The header and footer stay glass, and the footer keeps its existing top rule.
+- **UX-12: applied.** In TaskRow and the task card's `PriorityDot`, the priority is now text ("High", "Medium", "Low") in caption size and `--ink-2`, keeping `aria-label="<priority> priority"`. The words follow the data's values ("Medium", not "Normal"). No flag icon was added.
+- **UX-18: partly applied.** TimerPill's stop control is a filled square plus a "Stop" label, with a 24 px minimum target and `aria-label="Stop timer, <elapsed>, <context>"`. **Skipped:** removing the second timer from My time, because that changes screen structure and needs a design call.
+- **UX-19: applied.** The ring text always shows 2 decimals ("12.50"). When the scheduled and logged hours are both 0, an en dash in `--ink-3` replaces the ring, labelled "nothing scheduled". The ring was already 40 px.
+- **UX-20: partly applied.** The approver avatar has `role="img"` and `aria-label="Approver <name>"`. **Skipped:** the column header row, because it needs grid alignment work in `.apr` that this pass did not have time to verify.
+- **UX-22: applied.** `html` has `scroll-padding-top: calc(56px + 36px)` and `.sheet__body` has `scroll-padding-bottom: 72px`. **Skipped:** the Playwright focus check, left for the verify stage.
+- **UX-23: partly applied.** `.check` has a 24×24 minimum hit area. PeriodNav chevrons were already 32×32 (`--h-dense`), and the planner confirm glyph was already `aria-hidden`. **Skipped:** making the whole planner cell the target.
+- **UX-25: applied.** The phone banner is hidden on `/firm/overview` and `/firm/approvals`, and dismissing it is remembered in `localStorage`, wrapped in try/catch. A new `onDismiss` prop was added to InlineAlert. **Test updated:** `apps/web/tests/shell.spec.ts` now expects the banner to be hidden at 390 on Overview and visible on `/firm/people`. This has not been run, as Playwright belongs to the verify stage.
+
 Next in line, once tests are updated: UX-06 (bucket labels), UX-10 (units), UX-24 (wording), UX-02 (Log time footer). Each is small, but each changes strings that tests likely match.
 
 ## 4. Brief changes to consider

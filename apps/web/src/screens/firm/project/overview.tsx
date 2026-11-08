@@ -33,8 +33,8 @@ export function ProjectOverviewScreen() {
     { key: 'actual', header: 'Actual (h)', type: 'number', value: (x) => x.actual, total: (r) => r.reduce((s, x) => s + x.actual, 0) },
     { key: 'forecast', header: 'Forecast (h)', type: 'number', value: (x) => x.actual + x.etc, total: (r) => r.reduce((s, x) => s + x.actual + x.etc, 0) },
     {
-      key: 'variance', header: 'Var. (h)', type: 'number', value: (x) => x.actual + x.etc - x.budget,
-      render: (x) => { const v = x.actual + x.etc - x.budget; return <span style={{ color: v > 0 ? 'var(--danger-ink)' : undefined }}>{v > 0 ? `+${v}` : v}</span>; },
+      key: 'variance', header: 'Over / under (h)', type: 'number', value: (x) => x.actual + x.etc - x.budget,
+      render: (x) => { const v = x.actual + x.etc - x.budget; return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{v > 0 ? `+${v}` : v < 0 ? `−${-v}` : v}</span>; },
     },
     { key: 'status', header: 'Status', type: 'status', value: (x) => x.status },
   ];

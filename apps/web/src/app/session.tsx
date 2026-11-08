@@ -102,9 +102,13 @@ export const viewerFromMe = (me: MeResponse): Viewer => ({
 const NO_VIEWER: Viewer = { id: '', name: '', title: '', roles: [] };
 const noop = () => {};
 
-/** Loads the signed-in person. The login page renders without one; a 401 anywhere else goes to /login inside apiFetch. */
+/** Paths that render without a firm viewer: the login page, the invite page and the platform console (its own session). */
+const NO_VIEWER_PATHS = ['/platform', '/accept-invite'];
+const needsNoViewer = (path: string) => path === '/login' || NO_VIEWER_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+
+/** Loads the signed-in person. Those pages render without one; a 401 anywhere else goes to /login inside apiFetch. */
 function LiveSessionProvider({ children }: { children: ReactNode }) {
-  const onLogin = window.location.pathname === '/login';
+  const onLogin = needsNoViewer(window.location.pathname);
   const [viewer, setViewerState] = useState<Viewer | null>(onLogin ? NO_VIEWER : null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);

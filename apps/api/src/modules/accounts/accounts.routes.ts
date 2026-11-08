@@ -1,7 +1,15 @@
 import { hash } from '@node-rs/argon2';
-import type { PermissionSetKey } from '../../../../packages/domain/src/index';
-import { ApiError, audit, authorize, can, conflict, hashToken, list, newToken, notFound, required, ruleError, uuidParam, withFirm, type Actor, type Tx } from '../core';
-import { SESSION_COOKIE, type Api } from '../server';
+import type { PermissionSetKey } from '@ams/domain';
+import { ApiError, conflict, notFound, ruleError } from '../../http/errors';
+import { audit } from '../../audit/audit';
+import { authorize, can } from '../../auth/authorize';
+import { hashToken, newToken } from '../../auth/sessions';
+import { list } from '../../http/responses';
+import { required, uuidParam } from '../../http/validation';
+import { withFirm, type Tx } from '../../db/pool';
+import type { Actor } from '../../auth/actor';
+import { SESSION_COOKIE } from '../../auth/sessions';
+import type { Api } from '../../http/api';
 
 /** The agreed account types and the permission set each one grants. A person may hold several. */
 export const ACCOUNT_TYPES = ['principal', 'admin', 'finance', 'pm', 'employee'] as const;
@@ -142,6 +150,9 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     const added = types.filter((t) => !before.includes(t));
     const removed = before.filter((t) => !types.includes(t));
     const next = { account_types: types };
+    if (before.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can change the account types of a principal or finance account.', next);
+    }
     if (added.some((t) => SENSITIVE_TYPES.includes(t)) && personId === actor.id) await refuse(actor, firmId, personId, 'Sensitive account types cannot be given to yourself.', next);
     if ([...added, ...removed].some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
       await refuse(actor, firmId, personId, 'Only a principal can give or take away principal or finance.', next);
@@ -159,6 +170,10 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
          select $1, $2, s.id, 'firm', $3, 'Account type', $4, $3 from permission_set s where s.key = $5`,
         [firmId, personId, actor.id, SENSITIVE_TYPES.includes(t), TYPE_TO_SET[t]],
       );
+    }
+    // An unused invite link may be held by a non-principal; once the account becomes sensitive, that link must stop working.
+    if (added.some((t) => SENSITIVE_TYPES.includes(t))) {
+      await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actor.id]);
     }
     const audit_event_id = await audit(tx, actor, firmId, {
       recordType: 'person', recordId: personId, action: 'set_account_types', previous: { account_types: before }, next: { account_types: types, added, removed },
@@ -191,7 +206,12 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     if (!reason) throw new ApiError(400, 'VALIDATION', 'A reason is required.', [{ field: 'reason', code: 'required' }]);
     const p = (await tx.query('select login_state, employment_state from person where id = $1 for update', [personId])).rows[0];
     if (!p) throw notFound('Account');
-    if ((await currentTypes(tx, personId)).includes('principal')) await assertNotLastPrincipal(tx, personId);
+    if (personId === actor.id) throw ruleError('accounts.deactivate', 'You cannot deactivate your own account. Ask another admin or principal.');
+    const types = await currentTypes(tx, personId);
+    if (types.includes('principal')) await assertNotLastPrincipal(tx, personId);
+    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can deactivate a principal or finance account.', { action: 'deactivate' });
+    }
     await tx.query(`update person set login_state = 'Revoked', employment_state = 'Ended', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     await tx.query('update session set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and revoked_at is null', [personId, actor.id]);
     await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actor.id]);
@@ -207,6 +227,11 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     const personId = uuidParam(params.id, 'Account');
     const p = (await tx.query('select login_state, employment_state from person where id = $1 for update', [personId])).rows[0];
     if (!p) throw notFound('Account');
+    // Reactivating restores every grant the person still holds, so only a principal may bring back a principal or finance account.
+    const types = await currentTypes(tx, personId);
+    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can reactivate a principal or finance account.', { action: 'reactivate' });
+    }
     await tx.query(`update person set login_state = 'Enabled', employment_state = 'Active', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     const audit_event_id = await audit(tx, actor, firmId, {
       recordType: 'person', recordId: personId, action: 'reactivate', reason: typeof body.reason === 'string' ? body.reason : undefined,

@@ -2,9 +2,6 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { freshApp, type Fresh } from './helpers';
 
-// Needs migration 002 (packages/db/pending/002_accounts_platform.sql moved into packages/db/migrations)
-// and accountRoutes wired into server.ts with the two invite paths in PUBLIC.
-
 function withApp() {
   const ctx = {} as { f: Fresh };
   beforeAll(async () => { ctx.f = await freshApp(); });
@@ -207,6 +204,58 @@ describe('deactivating and reactivating', () => {
     expect(on.status).toBe(200);
     expect((await c.f.rawLogin('p05@meridian.demo', 'meridian-demo-2026')).statusCode).toBe(200);
     expect(await auditCount(c.f, 'reactivate', p05)).toBe(1);
+  });
+
+  it('an admin cannot deactivate or change the types of a principal or finance account; a principal can', async () => {
+    const p01 = c.f.id('P01');
+    const p10 = c.f.id('P10');
+    const types = await c.f.call('P10', 'PUT', `/accounts/${p01}/types`, { account_types: ['principal', 'pm'] });
+    expect(types.status).toBe(403);
+    expect(await setsOf(c.f, p01)).toEqual(['principal']);
+    const created = await c.f.call('P01', 'POST', '/accounts', { name: 'Leela Rao', work_email: 'leela@meridian.demo', job_title: 'Accounts', account_types: ['finance'] });
+    expect(created.status).toBe(200);
+    const target = created.body.id as string;
+    const pmTypes = await c.f.call('P10', 'PUT', `/accounts/${target}/types`, { account_types: ['finance', 'pm'] });
+    expect(pmTypes.status).toBe(403);
+    expect(await setsOf(c.f, target)).toEqual(['finance']);
+    const before = await auditCount(c.f, 'grant_refused', target);
+    const off = await c.f.call('P10', 'POST', `/accounts/${target}/deactivate`, { reason: 'Test' });
+    expect(off.status).toBe(403);
+    expect(await auditCount(c.f, 'grant_refused', target)).toBe(before + 1);
+    expect((await c.f.owner.query('select login_state from person where id = $1', [target])).rows[0].login_state).toBe('Enabled');
+    expect(await auditCount(c.f, 'deactivate', target)).toBe(0);
+    const byPrincipal = await c.f.call('P01', 'POST', `/accounts/${target}/deactivate`, { reason: 'Test' });
+    expect(byPrincipal.status).toBe(200);
+    // An admin may not bring a deactivated finance account back; a principal may.
+    const back = await c.f.call('P10', 'POST', `/accounts/${target}/reactivate`, {});
+    expect(back.status).toBe(403);
+    expect(back.body.error.capability).toBe('permissions.grant.sensitive');
+    expect((await c.f.owner.query('select login_state from person where id = $1', [target])).rows[0].login_state).toBe('Revoked');
+    expect(await auditCount(c.f, 'reactivate', target)).toBe(0);
+    expect((await c.f.call('P01', 'POST', `/accounts/${target}/reactivate`, {})).status).toBe(200);
+    // A principal may change a finance account's types.
+    const ok = await c.f.call('P01', 'PUT', `/accounts/${p10}/types`, { account_types: ['admin', 'finance', 'pm'] });
+    expect(ok.status).toBe(200);
+  });
+
+  it('making an invited account sensitive revokes the invite link an admin was given', async () => {
+    const made = await c.f.call('P10', 'POST', '/accounts', { name: 'Kiran Das', work_email: 'kiran@meridian.demo', job_title: 'Accounts', account_types: ['employee'] });
+    expect(made.status).toBe(200);
+    const token = tokenOf(made.body.invite_url);
+    const up = await c.f.call('P01', 'PUT', `/accounts/${made.body.id}/types`, { account_types: ['employee', 'finance'] });
+    expect(up.status).toBe(200);
+    const res = await accept(c.f, token);
+    expect(res.status).not.toBe(200);
+    expect(res.cookie).toBeUndefined();
+  });
+
+  it('nobody may deactivate themselves', async () => {
+    const self = await c.f.call('P10', 'POST', `/accounts/${c.f.id('P10')}/deactivate`, { reason: 'Leaving' });
+    expect(self.status).toBe(422);
+    const own = await c.f.call('P01', 'POST', `/accounts/${c.f.id('P01')}/deactivate`, { reason: 'Leaving' });
+    expect(own.status).toBe(422);
+    const row = (await c.f.owner.query('select login_state from person where id = $1', [c.f.id('P10')])).rows[0];
+    expect(row.login_state).toBe('Enabled');
   });
 
   it('deactivate needs a reason', async () => {

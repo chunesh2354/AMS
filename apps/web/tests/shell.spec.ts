@@ -56,6 +56,9 @@ test('sidebar collapses to 64 px under 1280 and hides under 768', async ({ page 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(nav).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Firm' })).toBeVisible();
+  // UX-25: the banner is hidden on Overview and Approvals, which work on a phone, and shown elsewhere.
+  await expect(page.getByText('Best on a larger screen')).toBeHidden();
+  await page.goto('/firm/people');
   await expect(page.getByText('Best on a larger screen')).toBeVisible();
 });
 

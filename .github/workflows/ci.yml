@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, core-path]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      # Real Postgres via embedded-postgres (test/global-setup.ts, port 54331). No Docker.
+      - run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run build-storybook
+      - run: npx playwright install --with-deps chromium
+      # Mock-mode suites; they serve dist (port 4173) and storybook-static (port 6106).
+      - run: npm run test:e2e
+      - run: npm run test:a11y
+
+  e2e-live:
+    runs-on: ubuntu-latest
+    # Allowed to fail until embedded-postgres is confirmed on the hosted runner.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: apps/api
+      - run: npm ci
+        working-directory: apps/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      # Starts a throwaway database (54332) and API (3001), builds live mode, serves it on 4273.
+      - run: npx playwright test -c playwright.live.config.ts
+        working-directory: apps/web

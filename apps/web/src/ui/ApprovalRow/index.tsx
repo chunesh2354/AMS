@@ -48,7 +48,7 @@ export function ApprovalRow({ item, selected, active, onSelect, onOpen, onApprov
         </button>
         <span className="t-numeric apr__amount">{item.amount}</span>
         <span className="t-numeric ink-2 apr__age">{item.ageDays} d</span>
-        <span className="apr__approver" title={`Approver ${item.approver}`}><Avatar name={item.approver} size={20} /></span>
+        <span className="apr__approver" title={`Approver ${item.approver}`} role="img" aria-label={`Approver ${item.approver}`}><Avatar name={item.approver} size={20} /></span>
         <span className="apr__actions">
           <Button size="dense" variant="secondary" onClick={onApprove}>Approve</Button>
           <Button size="dense" variant="ghost" icon={<CornerUpLeft size={16} strokeWidth={1.5} aria-hidden />} onClick={() => setReturning(true)}>Return</Button>

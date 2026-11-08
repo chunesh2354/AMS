@@ -8,7 +8,7 @@
     "esModuleInterop": true,
     "noEmit": true,
     "types": ["node"],
-    "paths": { "vitest": ["./node_modules/vitest"] }
+    "paths": { "vitest": ["./node_modules/vitest"], "@ams/domain": ["../../packages/domain/src/index.ts"] }
   },
   "include": ["src", "test", "../../packages/domain/src"]
 }

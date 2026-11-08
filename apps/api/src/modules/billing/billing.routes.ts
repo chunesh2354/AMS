@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { fixedFeeClaim, fromPaise, hoursValue, nteSplit, rechargeAmount, toPaise, transition } from '../../../../packages/domain/src/index';
-import { ApiError, audit, authorize, conflict, hasFirmCap, hours, idempotent, isoDate, list, money, notFound, required, rethrowTransition, ruleError, type Actor, type Tx } from '../core';
-import { findProject } from './projects';
-import { routeApprover } from './approvals';
-import { adapterFor, AdapterTimeout, type AdapterResult } from './accounting';
-import type { Api } from '../server';
+import { fixedFeeClaim, fromPaise, hoursValue, nteSplit, rechargeAmount, toPaise, transition } from '@ams/domain';
+import { ApiError, conflict, notFound, rethrowTransition, ruleError } from '../../http/errors';
+import { audit } from '../../audit/audit';
+import { authorize, hasFirmCap } from '../../auth/authorize';
+import { hours, list, money } from '../../http/responses';
+import { idempotent } from '../../http/idempotency';
+import { isoDate, required } from '../../http/validation';
+import type { Actor } from '../../auth/actor';
+import type { Tx } from '../../db/pool';
+import { findProject } from '../projects/projects.routes';
+import { routeApprover } from '../approvals/approvals.routes';
+import { adapterFor, AdapterTimeout, type AdapterResult } from '../integrations/adapters/accounting';
+import type { Api } from '../../http/api';
 
 type Source = { type: 'time_entry' | 'supplier_bill' | 'milestone' | 'percent_claim'; id: string; amount: number };
 export type ReadyItem = {

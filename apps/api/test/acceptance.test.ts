@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FENCED } from '../src/core';
+import { FENCED } from '../src/auth/redaction';
 import { freshApp, type Fresh } from './helpers';
 
 const WEEK = '2026-11-02';

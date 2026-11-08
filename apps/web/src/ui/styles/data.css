@@ -22,7 +22,10 @@
   display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); text-align: left; width: 100%; height: 100%;
   color: var(--ink-1); transition: transform var(--dur-1) var(--ease);
 }
-button.queue:hover:not(:disabled) { transform: translateY(-1px); }
+button.queue:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--line-strong); }
+.queue__label { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.queue__chevron { flex: none; color: var(--ink-3); transition: color var(--dur-1) var(--ease); }
+button.queue:hover .queue__chevron, button.queue:focus-visible .queue__chevron { color: var(--accent); }
 .queue__count { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
 .queue__num { font: var(--text-kpi); letter-spacing: var(--track-kpi); color: var(--tone-ink); }
 .queue__trend { display: inline-flex; align-items: center; gap: 2px; font: var(--text-caption); color: var(--ink-2); }

@@ -7,6 +7,8 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
+  /* Keep focused rows clear of the 56 px top bar and 36 px sticky table header (WCAG 2.4.11). */
+  scroll-padding-top: calc(56px + 36px);
   font-family: var(--font-sans);
   font-feature-settings: "tnum" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
@@ -42,6 +44,7 @@ svg { display: block; flex: none; }
 .t-kpi { font: var(--text-kpi); letter-spacing: var(--track-kpi); }
 .t-timer { font: var(--text-timer); }
 .ink-2 { color: var(--ink-2); }
+.ink-3 { color: var(--ink-3); }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;

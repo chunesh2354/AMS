@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { hash, verify } from '@node-rs/argon2';
-import { ApiError, hashToken, isUuid, newToken, notFound, required } from '../core';
+import { ApiError, notFound } from '../../http/errors';
+import { hashToken, newToken } from '../../auth/sessions';
+import { isUuid, required } from '../../http/validation';
 
 /**
  * Platform administration: the people who run the service, not any firm's users.

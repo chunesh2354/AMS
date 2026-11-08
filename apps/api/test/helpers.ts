@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { appUrl, ownerUrl } from '../src/dev/db';
-import { buildApp } from '../src/server';
+import { buildApp } from '../src/app';
 
 const PORT = 54331;
 export const PASSWORD = 'meridian-demo-2026';

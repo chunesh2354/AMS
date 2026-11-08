@@ -90,12 +90,16 @@ it('labels Contribution a management estimate and fences it for a PM', async () 
   expect(screen.queryByText('56%')).toBeNull();
 });
 
-it('shows the MOCK integration and the eight settings sections', async () => {
+it('shows the MOCK integration and the nine settings sections, with Accounts after Permissions', async () => {
   openApp('/firm/settings/integrations');
   const card = await screen.findByRole('region', { name: 'Accounting' });
   expect(within(card).getByText('MOCK')).toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: 'Payroll' })).getByText('Not configured')).toBeInTheDocument();
-  expect(within(screen.getByRole('navigation', { name: 'Settings' })).getAllByRole('link')).toHaveLength(8);
+  const links = within(screen.getByRole('navigation', { name: 'Settings' })).getAllByRole('link');
+  expect(links).toHaveLength(9);
+  const labels = links.map((l) => l.textContent);
+  expect(labels.indexOf('Accounts')).toBe(labels.indexOf('Permissions') + 1);
+  expect(links[labels.indexOf('Accounts')]).toHaveAttribute('href', '/firm/settings/accounts');
 });
 
 it('blocks an import until the red cells are fixed', async () => {
