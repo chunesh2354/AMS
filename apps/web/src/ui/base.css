@@ -1,6 +1,7 @@
 @import '@fontsource/geist-sans/400.css';
 @import '@fontsource/geist-sans/500.css';
 @import '@fontsource/geist-sans/600.css';
+@import '@fontsource/geist-sans/700.css';
 @import '@fontsource/geist-mono/400.css';
 @import '@fontsource/geist-mono/500.css';
 
@@ -10,7 +11,8 @@ html {
   /* Keep focused rows clear of the 56 px top bar and 36 px sticky table header (WCAG 2.4.11). */
   scroll-padding-top: calc(56px + 36px);
   font-family: var(--font-sans);
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   background: var(--surface-muted);
   color: var(--ink-1);
@@ -26,7 +28,7 @@ ul, ol { list-style: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-a { color: var(--accent-text); text-decoration: none; }
+a { color: var(--accent-text); text-decoration: none; text-underline-offset: 3px; }
 a:hover { text-decoration: underline; }
 svg { display: block; flex: none; }
 :focus { outline: none; }

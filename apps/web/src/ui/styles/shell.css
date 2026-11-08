@@ -18,9 +18,9 @@
   transition: width var(--dur-2) var(--ease);
 }
 .sidenav--collapsed { width: var(--sidebar-collapsed); align-items: center; }
-.sidenav__brand { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-dense); padding: 0 var(--s-2); font: var(--text-h3); white-space: nowrap; }
+.sidenav__brand { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-dense); padding: 0 var(--s-2); font: var(--text-h3); font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; }
 .sidenav--collapsed .sidenav__brand { padding: 0; }
-.sidenav__mark { width: 20px; height: 20px; border-radius: var(--radius-sm); background: var(--accent); flex: none; }
+.sidenav__mark { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), var(--info)); box-shadow: var(--shadow-mark); flex: none; }
 .sidenav__group { display: flex; flex-direction: column; gap: 2px; width: 100%; }
 .sidenav__head { padding: var(--s-2) var(--s-2) var(--s-1); color: var(--ink-2); font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; }
 .sidenav__item {
@@ -28,7 +28,7 @@
   border-radius: var(--radius-md); color: var(--ink-1); white-space: nowrap; transition: background var(--dur-1) var(--ease);
 }
 a.sidenav__item:hover { background: var(--neutral-soft); text-decoration: none; }
-a.sidenav__item.active { background: var(--accent-soft); font-weight: 500; }
+a.sidenav__item.active { background: var(--accent-soft); font-weight: 600; }
 a.sidenav__item.active svg { color: var(--accent-text); }
 .sidenav--collapsed .sidenav__item { justify-content: center; padding: 0; width: 40px; }
 .sidenav--collapsed .sidenav__group { align-items: center; }
@@ -89,7 +89,7 @@ a.sidenav__item.active svg { color: var(--accent-text); }
 .pagehead__tabs { display: flex; gap: var(--s-5); overflow-x: auto; margin-top: var(--s-1); border-bottom: 1px solid var(--line); }
 .pagehead__tab { padding: var(--s-2) 0; color: var(--ink-2); font: var(--text-body-sm); font-weight: 500; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .pagehead__tab:hover { color: var(--ink-1); text-decoration: none; }
-.pagehead__tab.active { color: var(--ink-1); border-bottom-color: var(--accent); }
+.pagehead__tab.active { color: var(--ink-1); font-weight: 600; border-bottom-color: var(--ink-1); }
 
 /* Sheet */
 .sheet-scrim { position: fixed; inset: 0; z-index: 60; background: var(--neutral-soft); opacity: 0; transition: opacity var(--dur-2) var(--ease); }
