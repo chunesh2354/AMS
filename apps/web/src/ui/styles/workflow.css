@@ -42,7 +42,7 @@ a.attention__row:hover { background: var(--surface-muted); text-decoration: none
 .stepper { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); margin: 0 0 var(--s-5); padding: 0; list-style: none; }
 .stepper__step { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--ink-2); font: var(--text-body-sm); font-weight: 500; }
 .stepper__step.is-current { color: var(--ink-1); }
-.stepper__n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); font: 500 12px/1 var(--font-mono); }
+.stepper__n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); font: 500 12px/1 var(--font-sans); }
 .stepper__step.is-current .stepper__n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .stepper__step.is-done .stepper__n { background: var(--accent-soft); border-color: var(--accent); }
 

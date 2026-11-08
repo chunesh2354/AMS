@@ -40,7 +40,7 @@ svg { display: block; flex: none; }
 .t-h3 { font: var(--text-h3); }
 .t-body { font: var(--text-body); }
 .t-body-sm { font: var(--text-body-sm); }
-.t-label { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+.t-label { font: var(--text-label); letter-spacing: var(--track-label); }
 .t-caption { font: var(--text-caption); }
 .t-numeric { font: var(--text-numeric); }
 .t-kpi { font: var(--text-kpi); letter-spacing: var(--track-kpi); }

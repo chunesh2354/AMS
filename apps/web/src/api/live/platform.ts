@@ -74,3 +74,19 @@ export const reactivateFirm = (id: string, reason: string) =>
   platformFetch<unknown>(`/firms/${encodeURIComponent(id)}/reactivate`, { body: { reason } });
 
 export const listPlatformAudit = () => platformFetch<{ data: PlatformAuditEntry[] }>('/audit').then((r) => r.data);
+
+export type OwnerInvitationState = 'Not sent' | 'Sent' | 'Accepted' | 'Expired';
+/** One company. Still counts only; the one person named is the company owner, so the invite can be handed over. */
+export type PlatformFirmDetail = PlatformFirm & {
+  suspended_reason: string | null;
+  owner_name: string | null;
+  owner_email: string | null;
+  owner_invitation_state: OwnerInvitationState | null;
+};
+export type OwnerInvite = { invite_url: string; invite_expires_at: string; email_sent: false };
+
+export const getFirm = (id: string) => platformFetch<PlatformFirmDetail>(`/firms/${encodeURIComponent(id)}`);
+
+/** A new owner invite link. Only while the owner has not accepted; earlier links stop working. */
+export const reissueOwnerInvite = (id: string) =>
+  platformFetch<OwnerInvite>(`/firms/${encodeURIComponent(id)}/owner-invite`, { method: 'POST', body: {} });

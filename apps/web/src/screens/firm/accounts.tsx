@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import {
   ACCOUNT_TYPES, absoluteInviteUrl, accountTypeLabel, createAccount, deactivateAccount, listAccounts, reactivateAccount, resendInvite,
@@ -18,6 +18,7 @@ import type { Status } from '../../ui/status-colors';
 import { TextArea } from '../../ui/TextArea';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
+import { COPY_BLOCKED, useCopy } from '../../ui/copy';
 
 export const EMAIL_NOTE = 'Email delivery is not connected yet. Send this link yourself.';
 const MOCK_NOTE = 'Nothing is saved in this demo.';
@@ -56,19 +57,17 @@ function TypePicker({ value, onChange, error }: { value: AccountType[]; onChange
 /** The invite link, a copy button and the delivery note. */
 export function InviteLink({ invite }: { invite: Invite }) {
   const toast = useToast();
+  const id = useId();
   const url = absoluteInviteUrl(invite.invite_url);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast({ variant: 'success', message: 'Invite link copied.' });
-    } catch {
-      toast({ variant: 'warn', message: 'Could not copy. Select the link and copy it yourself.' });
-    }
+  const { state, copy } = useCopy();
+  const onCopy = async () => {
+    if (await copy(url, id)) toast({ variant: 'success', message: 'Invite link copied.' });
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
-      <TextField label="Invite link" value={url} readOnly mono onFocus={(e) => e.target.select()} helper={`Works once, until ${new Date(invite.invite_expires_at).toLocaleString()}.`} />
-      <span><Button onClick={copy}>Copy link</Button></span>
+      <TextField id={id} label="Invite link" value={url} readOnly mono onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} helper={`Works once, until ${new Date(invite.invite_expires_at).toLocaleString()}.`} />
+      <span><Button onClick={() => void onCopy()}>{state === 'copied' ? 'Copied' : 'Copy link'}</Button></span>
+      {state === 'blocked' && <InlineAlert variant="warn" title={COPY_BLOCKED} />}
       <InlineAlert variant="warn" title={EMAIL_NOTE} />
     </div>
   );

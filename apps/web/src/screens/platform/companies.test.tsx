@@ -128,6 +128,101 @@ describe('platform companies panel', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
+  it('opens a company from its row: counts and the owner only, and a new invite link that copies', async () => {
+    const fetchFn = mockApi({
+      'GET /api/v1/platform/firms/f-1': { body: { ...FIRMS[0], suspended_reason: null, owner_name: 'Tara Owner', owner_email: 'tara@meridian.test', owner_invitation_state: 'Expired' } },
+      'POST /api/v1/platform/firms/f-1/owner-invite': { body: { invite_url: '/accept-invite/newtok456', invite_expires_at: '2026-11-11T10:00:00Z', email_sent: false } },
+    });
+    const user = userEvent.setup();
+    await openLive();
+    await user.click(await screen.findByText('Studio Meridian'));
+    const sheet = await screen.findByRole('dialog', { name: 'Studio Meridian' });
+    expect(await within(sheet).findByText('Meridian Design LLP')).toBeInTheDocument();
+    expect(within(sheet).getByText('Tara Owner')).toBeInTheDocument();
+    expect(within(sheet).getByText('tara@meridian.test')).toBeInTheDocument();
+    expect(within(sheet).getByRole('status', { name: 'Invite expired' })).toBeInTheDocument();
+    expect(within(sheet).getByText('Asia/Kolkata')).toBeInTheDocument();
+    expect(within(sheet).getByText('18')).toBeInTheDocument();
+    expect(within(sheet).getByText('16')).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: 'Suspend' })).toBeInTheDocument();
+
+    await user.click(within(sheet).getByRole('button', { name: 'New invite link' }));
+    expect(await within(sheet).findByDisplayValue(/\/accept-invite\/newtok456$/)).toBeInTheDocument();
+    expect(fetchFn.mock.calls.some(([url, init]) => url === '/api/v1/platform/firms/f-1/owner-invite' && init?.method === 'POST')).toBe(true);
+    await user.click(within(sheet).getByRole('button', { name: 'Copy link' }));
+    expect(await within(sheet).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(await navigator.clipboard.readText()).toMatch(/\/accept-invite\/newtok456$/);
+  });
+
+  it('opens a company from the keyboard, and the row menu still works without opening it', async () => {
+    mockApi({
+      'GET /api/v1/platform/firms/f-2': { body: { ...FIRMS[1], suspended_reason: 'Unpaid subscription', owner_name: 'Ravi Owner', owner_email: 'ravi@northline.test', owner_invitation_state: 'Accepted' } },
+    });
+    const user = userEvent.setup();
+    await openLive();
+    await screen.findByText('Studio Meridian');
+    await user.click(screen.getByRole('button', { name: 'Actions for Studio Meridian' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Suspend' }));
+    expect(await screen.findByRole('dialog', { name: 'Suspend Studio Meridian' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Studio Meridian' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Suspend Studio Meridian' })).not.toBeInTheDocument());
+
+    const row = screen.getByText('Northline Architects', { selector: 'div' }).closest('tr')!;
+    row.focus();
+    await user.keyboard('{Enter}');
+    const sheet = await screen.findByRole('dialog', { name: 'Northline Architects' });
+    expect(await within(sheet).findByText('Unpaid subscription')).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: 'Reactivate' })).toBeInTheDocument();
+    // Accepted: no new invite to send.
+    expect(within(sheet).queryByRole('button', { name: 'New invite link' })).not.toBeInTheDocument();
+  });
+
+  it('shows a clear message and selects the link when the browser blocks copying', async () => {
+    mockApi({
+      'POST /api/v1/platform/firms': { body: { firm_id: 'f-3', invite_url: '/accept-invite/tok123', invite_expires_at: '2026-11-11T10:00:00Z', email_sent: false } },
+    });
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('blocked')) }, configurable: true });
+    Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true, writable: true });
+    await openLive();
+    await screen.findByText('Studio Meridian');
+    await user.click(screen.getByRole('button', { name: 'Add company' }));
+    const sheet = await screen.findByRole('dialog');
+    await user.type(within(sheet).getByLabelText('Trading name'), 'Kiln Studio');
+    await user.type(within(sheet).getByLabelText('Legal name'), 'Kiln Studio LLP');
+    await user.type(within(sheet).getByLabelText('Owner name'), 'Meera Iyer');
+    await user.type(within(sheet).getByLabelText('Owner email'), 'meera@kiln.test');
+    await user.click(within(sheet).getByRole('button', { name: 'Create company' }));
+    const field = await within(sheet).findByDisplayValue(/\/accept-invite\/tok123$/) as HTMLInputElement;
+    await user.click(within(sheet).getByRole('button', { name: 'Copy link' }));
+    expect(await within(sheet).findByText('Copy blocked by the browser. The link is selected; press Ctrl+C.')).toBeInTheDocument();
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, field.value.length]);
+    Reflect.deleteProperty(document, 'execCommand');
+  });
+
+  it('shows the legal name in the table only when it differs, and the activity in plain words', async () => {
+    mockApi({
+      'GET /api/v1/platform/firms': { body: { data: [{ ...FIRMS[0], legal_name: 'Studio Meridian' }, FIRMS[1]] } },
+      'GET /api/v1/platform/audit': { body: { data: [
+        { id: 'a-1', at: '2026-11-07T10:00:00Z', admin_name: 'Asha Rao', action: 'suspend_firm', firm_id: 'f-2', firm_name: 'Northline Architects', reason: 'Unpaid subscription' },
+        { id: 'a-2', at: '2026-11-07T09:00:00Z', admin_name: 'Asha Rao', action: 'reissue_owner_invite', firm_id: 'f-1', firm_name: 'Studio Meridian', reason: null },
+        { id: 'a-3', at: '2026-11-07T08:00:00Z', admin_name: 'Asha Rao', action: 'create_firm', firm_id: 'f-1', firm_name: 'Studio Meridian', reason: null },
+        { id: 'a-4', at: '2026-11-07T07:00:00Z', admin_name: 'Asha Rao', action: 'login', firm_id: null, firm_name: null, reason: null },
+        { id: 'a-5', at: '2026-11-07T06:00:00Z', admin_name: 'Asha Rao', action: 'reactivate_firm', firm_id: 'f-2', firm_name: 'Northline Architects', reason: 'Paid' },
+      ] } },
+    });
+    await openLive();
+    await screen.findByText('Northline Pvt Ltd');
+    expect(screen.getAllByText('Studio Meridian')).toHaveLength(1);
+    expect(await screen.findByText('Suspended Northline Architects - Unpaid subscription')).toBeInTheDocument();
+    expect(screen.getByText('Sent a new owner invite for Studio Meridian')).toBeInTheDocument();
+    expect(screen.getByText('Added Studio Meridian')).toBeInTheDocument();
+    expect(screen.getByText('Signed in')).toBeInTheDocument();
+    expect(screen.getByText('Reactivated Northline Architects - Paid')).toBeInTheDocument();
+  });
+
   it('shows a duplicate owner email against the field', async () => {
     mockApi({
       'POST /api/v1/platform/firms': { status: 409, body: { error: { code: 'DUPLICATE_EMAIL', message: 'This email already has an account.' } } },

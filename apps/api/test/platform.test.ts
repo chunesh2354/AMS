@@ -250,6 +250,142 @@ describe('suspending a firm', () => {
   });
 });
 
+const DETAIL_KEYS = ['active_people', 'created_at', 'currency', 'id', 'last_login_at', 'legal_name', 'owner_email', 'owner_invitation_state',
+  'owner_name', 'people', 'status', 'suspended_reason', 'timezone', 'trading_name'];
+
+describe('company detail and a new owner invite (migration 004)', () => {
+  const c = withPlatform();
+  const tokens = async (firmId: string) => (await c.f.owner.query('select count(*)::int as n from invitation_token where firm_id = $1', [firmId])).rows[0].n;
+
+  it('shows counts and the owner only, never projects, money or other people', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Detail Studio');
+    const r = await asAdmin(c.f, c.admin, 'GET', `/firms/${firm.firm_id}`);
+    expect(r.status).toBe(200);
+    expect(Object.keys(r.body).sort()).toEqual(DETAIL_KEYS);
+    expect(r.body).toMatchObject({
+      id: firm.firm_id, trading_name: 'Detail Studio', legal_name: 'Detail Studio LLP', status: 'Active', suspended_reason: null,
+      timezone: 'Asia/Kolkata', currency: 'INR', people: 1, active_people: 1, last_login_at: null,
+      owner_name: 'Tara Owner', owner_email: firm.owner_email, owner_invitation_state: 'Sent',
+    });
+
+    const demo = await asAdmin(c.f, c.admin, 'GET', `/firms/${c.f.firmId}`);
+    expect(demo.status).toBe(200);
+    expect(Object.keys(demo.body).sort()).toEqual(DETAIL_KEYS);
+    expect(demo.body.people).toBe(10);
+    expect(demo.body.owner_invitation_state).toBe('Accepted');
+    for (const k of allKeys(demo.body)) {
+      expect(k).not.toMatch(/project|amount|rate|invoice|hours|time_entry|budget|fee|cost|margin|client/i);
+    }
+    // Only the owner's name and email: nobody else at the firm.
+    const owner = (await c.f.owner.query(`select name, work_email from person where firm_id = $1 and ref_code = 'P01'`, [c.f.firmId])).rows[0];
+    expect(demo.body.owner_name).toBe(owner.name);
+    expect(demo.body.owner_email).toBe(owner.work_email);
+    const json = JSON.stringify(demo.body);
+    const others = (await c.f.owner.query(`select name, work_email from person where firm_id = $1 and ref_code <> 'P01'`, [c.f.firmId])).rows;
+    expect(others.length).toBeGreaterThan(0);
+    for (const p of others) {
+      expect(json).not.toContain(p.name);
+      expect(json).not.toContain(p.work_email);
+    }
+    const projects = (await c.f.owner.query('select name from project')).rows;
+    for (const p of projects) expect(json).not.toContain(p.name);
+  });
+
+  it('an unknown or malformed id is 404', async () => {
+    expect((await asAdmin(c.f, c.admin, 'GET', '/firms/00000000-0000-4000-8000-000000000000')).status).toBe(404);
+    expect((await asAdmin(c.f, c.admin, 'GET', '/firms/not-a-uuid')).status).toBe(404);
+    expect((await asAdmin(c.f, c.admin, 'POST', '/firms/00000000-0000-4000-8000-000000000000/owner-invite', {})).status).toBe(404);
+  });
+
+  it('a new owner invite replaces the old link; the new one accepts; after that no new invite is issued', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Reissue Studio');
+    const r = await asAdmin(c.f, c.admin, 'POST', `/firms/${firm.firm_id}/owner-invite`, {});
+    expect(r.status).toBe(200);
+    expect(r.body.invite_url).toMatch(/^\/accept-invite\/[A-Za-z0-9_-]{43}$/);
+    expect(r.body.invite_url).not.toBe(firm.invite_url);
+    const hours = (Date.parse(r.body.invite_expires_at) - Date.now()) / 3600_000;
+    expect(hours).toBeGreaterThan(71);
+    expect(hours).toBeLessThanOrEqual(72.1);
+    const fresh = r.body.invite_url.replace('/accept-invite/', '');
+    const stored = (await c.f.owner.query('select token_hash from invitation_token')).rows.map((x) => x.token_hash);
+    expect(stored).not.toContain(fresh);
+    expect(stored).toContain(hashToken(fresh));
+
+    // The old link stops working.
+    const oldToken = firm.invite_url.replace('/accept-invite/', '');
+    expect([404, 410]).toContain((await inject(c.f, 'GET', `/api/v1/auth/invite/${oldToken}`)).status);
+    expect([404, 410]).toContain((await acceptInvite(c.f, firm.invite_url)).status);
+
+    // The new link accepts.
+    expect((await inject(c.f, 'GET', `/api/v1/auth/invite/${fresh}`)).status).toBe(200);
+    const accepted = await acceptInvite(c.f, r.body.invite_url);
+    expect(accepted.status).toBe(200);
+    expect((await asAdmin(c.f, c.admin, 'GET', `/firms/${firm.firm_id}`)).body.owner_invitation_state).toBe('Accepted');
+
+    // After acceptance a new invite is refused and nothing is written.
+    const before = await tokens(firm.firm_id);
+    const again = await asAdmin(c.f, c.admin, 'POST', `/firms/${firm.firm_id}/owner-invite`, {});
+    expect(again.status).toBe(422);
+    expect(again.body.error.message).toMatch(/already accepted/i);
+    expect(await tokens(firm.firm_id)).toBe(before);
+
+    const audit = (await asAdmin(c.f, c.admin, 'GET', '/audit')).body.data.filter((e: any) => e.firm_id === firm.firm_id);
+    expect(audit.filter((e: any) => e.action === 'reissue_owner_invite')).toHaveLength(1);
+  });
+
+  it('refuses a new owner invite for a suspended company', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Paused Studio');
+    expect((await asAdmin(c.f, c.admin, 'POST', `/firms/${firm.firm_id}/suspend`, { reason: 'Paused' })).status).toBe(200);
+    const before = await tokens(firm.firm_id);
+    const r = await asAdmin(c.f, c.admin, 'POST', `/firms/${firm.firm_id}/owner-invite`, {});
+    expect(r.status).toBe(422);
+    expect(r.body.error.message).toMatch(/suspended/i);
+    expect(await tokens(firm.firm_id)).toBe(before);
+  });
+
+  it('refuses a new owner invite when the owner login is not enabled, since that link could never be accepted', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Locked Studio');
+    await c.f.owner.query(`update person set login_state = 'Suspended' where firm_id = $1 and ref_code = 'P01'`, [firm.firm_id]);
+    const before = await tokens(firm.firm_id);
+    const r = await asAdmin(c.f, c.admin, 'POST', `/firms/${firm.firm_id}/owner-invite`, {});
+    expect(r.status).toBe(422);
+    expect(r.body.error.message).toMatch(/not enabled/i);
+    expect(await tokens(firm.firm_id)).toBe(before);
+    // The original link was not revoked by the refused call.
+    const live = (await c.f.owner.query('select count(*)::int as n from invitation_token where firm_id = $1 and revoked_at is null', [firm.firm_id])).rows[0].n;
+    expect(live).toBe(1);
+  });
+
+  it('is 401 with no session, a firm session, or a firm token under the platform cookie', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Guarded Studio');
+    const firmToken = await c.f.login('P01');
+    const before = await tokens(firm.firm_id);
+    for (const [method, path] of [['GET', `/firms/${firm.firm_id}`], ['POST', `/firms/${firm.firm_id}/owner-invite`]] as const) {
+      expect((await inject(c.f, method, `/api/v1/platform${path}`)).status).toBe(401);
+      expect((await inject(c.f, method, `/api/v1/platform${path}`, { cookies: { ams_session: firmToken } })).status).toBe(401);
+      expect((await asAdmin(c.f, firmToken, method, path)).status).toBe(401);
+    }
+    expect(await tokens(firm.firm_id)).toBe(before);
+  });
+
+  it('at SQL level, a firm user session hash and a made-up hash raise 28000 for both functions', async () => {
+    const firm = await createFirm(c.f, c.admin, 'Sql Guard Studio');
+    const firmToken = await c.f.login('P01');
+    const before = await tokens(firm.firm_id);
+    const app = await c.f.appClient();
+    try {
+      for (const h of [hashToken(firmToken), hashToken('never-issued')]) {
+        await expect(app.query('select * from platform_firm_detail($1, $2)', [h, firm.firm_id])).rejects.toMatchObject({ code: '28000' });
+        await expect(app.query('select platform_reissue_owner_invite($1, $2, $3, $4)', [h, firm.firm_id, hashToken(`x-${h}`), new Date(Date.now() + 3600_000)]))
+          .rejects.toMatchObject({ code: '28000' });
+      }
+    } finally {
+      await app.end();
+    }
+    expect(await tokens(firm.firm_id)).toBe(before);
+  });
+});
+
 describe('platform audit', () => {
   const c = withPlatform();
   it('records every action with the admin, the firm and the reason', async () => {
@@ -314,6 +450,8 @@ describe('platform functions are bound to a live platform session (migration 003
         ['select * from platform_create_firm($1, $2, $3, $4, $5, $6, $7, $8, $9)',
           [tokenHash, 'Rogue Studio', 'Rogue Studio LLP', 'Asia/Kolkata', 'INR', 'Rogue Owner', 'rogue@rogue.example', hashToken('rogue-invite'), FUTURE()]],
         ['select platform_set_firm_status($1, $2, $3, $4)', [tokenHash, c.f.firmId, 'Suspended', 'No session']],
+        ['select * from platform_firm_detail($1, $2)', [tokenHash, c.f.firmId]],
+        ['select platform_reissue_owner_invite($1, $2, $3, $4)', [tokenHash, c.f.firmId, hashToken('rogue-reissue'), FUTURE()]],
       ];
       for (const [sql, params] of calls) {
         await expect(app.query(sql, params)).rejects.toMatchObject({ code: '28000' });
@@ -369,6 +507,7 @@ describe('platform functions are bound to a live platform session (migration 003
       expect((await c.f.owner.query('select to_regprocedure($1) as p', [sig])).rows[0].p, sig).toBeNull();
     }
     for (const sig of ['platform_list_firms(text)', 'platform_audit_list(text)', 'platform_auth_lookup(text)',
+      'platform_firm_detail(text,uuid)', 'platform_reissue_owner_invite(text,uuid,text,timestamptz)',
       'platform_create_firm(text,text,text,text,text,text,text,text,timestamptz)', 'platform_set_firm_status(text,uuid,text,text)']) {
       expect((await c.f.owner.query('select to_regprocedure($1) as p', [sig])).rows[0].p, sig).not.toBeNull();
     }
@@ -401,7 +540,8 @@ describe('platform functions are bound to a live platform session (migration 003
     const executable = (await c.f.owner.query(`
       select p.proname from pg_proc p where p.proname like 'platform%' and has_function_privilege('ams_app', p.oid, 'execute') order by 1`)).rows.map((r) => r.proname);
     expect(executable).toEqual(['platform_audit_list', 'platform_auth_lookup', 'platform_create_firm', 'platform_create_session',
-      'platform_find_session', 'platform_list_firms', 'platform_revoke_session', 'platform_set_firm_status']);
+      'platform_find_session', 'platform_firm_detail', 'platform_list_firms', 'platform_reissue_owner_invite', 'platform_revoke_session',
+      'platform_set_firm_status']);
   });
 
   it('platform_create_session writes the login audit row and refuses a session longer than 12 hours', async () => {

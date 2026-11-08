@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from 'react';
 import { Copy, Plus } from 'lucide-react';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import {
-  createFirm, listFirms, listPlatformAudit, platformLogout, platformMe, reactivateFirm, suspendFirm,
-  type NewFirm, type NewFirmResult, type PlatformAdmin, type PlatformAuditEntry, type PlatformFirm,
+  createFirm, getFirm, listFirms, listPlatformAudit, platformLogout, platformMe, reactivateFirm, reissueOwnerInvite, suspendFirm,
+  type NewFirm, type NewFirmResult, type OwnerInvite, type PlatformAdmin, type PlatformAuditEntry, type PlatformFirm, type PlatformFirmDetail,
 } from '../../api/live/platform';
 import { ActivityFeed, type ActivityDay } from '../../ui/ActivityFeed';
 import { Button } from '../../ui/Button';
@@ -19,6 +19,7 @@ import { Sheet } from '../../ui/Sheet';
 import { StatusChip } from '../../ui/StatusChip';
 import { TextArea } from '../../ui/TextArea';
 import { TextField } from '../../ui/TextField';
+import { COPY_BLOCKED, useCopy } from '../../ui/copy';
 import { formatDate, formatGrouped, toISO } from '../../ui/format';
 
 export const PRODUCT_NAME = 'Practice platform';
@@ -60,8 +61,11 @@ function PlatformBar({ admin }: { admin: PlatformAdmin | null }) {
   };
   return (
     <header className="glass glass--bar" style={{ position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 'var(--s-4)', padding: 'var(--s-3) var(--s-4)', flexWrap: 'wrap' }}>
-      <strong className="t-h3">{PRODUCT_NAME}</strong>
-      <span className="t-label">Platform admin</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s-2)' }}>
+        <span className="sidenav__mark" aria-hidden />
+        <strong className="t-h3">{PRODUCT_NAME}</strong>
+      </span>
+      <span className="ink-2 t-body-sm">Platform admin</span>
       <span style={{ flex: 1 }} />
       {failure && <span role="alert" className="t-body-sm">{failure}</span>}
       {admin && <span className="t-body-sm">{admin.name}</span>}
@@ -70,7 +74,11 @@ function PlatformBar({ admin }: { admin: PlatformAdmin | null }) {
   );
 }
 
-type Action = { kind: 'suspend' | 'reactivate'; firm: PlatformFirm };
+type Action = { kind: 'suspend' | 'reactivate'; firm: PlatformFirm; fromDetail?: boolean };
+
+/** The legal name is shown only when it says something the trading name does not. */
+const legalDiffers = (f: Pick<PlatformFirm, 'trading_name' | 'legal_name'>) =>
+  !!f.legal_name && f.legal_name.trim().toLowerCase() !== f.trading_name.trim().toLowerCase();
 
 function LivePanel() {
   const [admin, setAdmin] = useState<PlatformAdmin | null>(null);
@@ -83,6 +91,7 @@ function LivePanel() {
   const [adding, setAdding] = useState(false);
   const [action, setAction] = useState<Action | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [openFirm, setOpenFirm] = useState<PlatformFirm | null>(null);
 
   const loadFirms = useCallback(async () => {
     setState('loading');
@@ -129,7 +138,7 @@ function LivePanel() {
       render: (f) => (
         <div>
           <div>{f.trading_name}</div>
-          <div className="t-caption">{f.legal_name}</div>
+          {legalDiffers(f) && <div className="t-caption">{f.legal_name}</div>}
         </div>
       ),
     },
@@ -169,6 +178,7 @@ function LivePanel() {
           errorMessage={error}
           onRetry={loadFirms}
           capability="manage companies"
+          onRowClick={(f) => setOpenFirm(f)}
           rowActions={(f) => (f.status === 'Active'
             ? [{ label: 'Suspend', danger: true, onSelect: () => setAction({ kind: 'suspend', firm: f }) }]
             : [{ label: 'Reactivate', onSelect: () => setAction({ kind: 'reactivate', firm: f }) }])}
@@ -181,12 +191,163 @@ function LivePanel() {
         </section>
       </main>
       <AddCompanySheet open={adding} onClose={() => setAdding(false)} onCreated={refresh} />
+      <CompanySheet
+        firm={openFirm}
+        onClose={() => setOpenFirm(null)}
+        onChanged={refresh}
+        onStatus={(kind, firm) => { setOpenFirm(null); setAction({ kind, firm, fromDetail: true }); }}
+      />
       <StatusSheet
         action={action}
-        onClose={() => setAction(null)}
-        onDone={(msg) => { setAction(null); setNotice(msg); refresh(); }}
+        onClose={() => { if (action?.fromDetail) setOpenFirm(action.firm); setAction(null); }}
+        onDone={(msg) => {
+          if (action?.fromDetail) setOpenFirm({ ...action.firm, status: action.kind === 'suspend' ? 'Suspended' : 'Active' });
+          setAction(null); setNotice(msg); refresh();
+        }}
       />
     </>
+  );
+}
+
+/** Platform audit actions in plain words. An action this screen does not know yet is shown as recorded. */
+export function describeAction(e: Pick<PlatformAuditEntry, 'action' | 'firm_name'>): string {
+  const firm = e.firm_name ?? 'a company';
+  switch (e.action) {
+    case 'login': return 'Signed in';
+    case 'create_firm': return `Added ${firm}`;
+    case 'suspend_firm': return `Suspended ${firm}`;
+    case 'reactivate_firm': return `Reactivated ${firm}`;
+    case 'reissue_owner_invite': return `Sent a new owner invite for ${firm}`;
+    default: return [e.action, e.firm_name].filter(Boolean).join(': ');
+  }
+}
+
+/** A read-only invite link that selects itself, a Copy button that says when it worked, and a fallback when it did not. */
+function InviteLinkField({ url }: { url: string }) {
+  const id = useId();
+  const { state, copy } = useCopy();
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+      <TextField id={id} label="Invite link" value={url} readOnly mono onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} />
+      <div><Button icon={<Copy size={16} strokeWidth={1.5} aria-hidden />} onClick={() => void copy(url, id)}>{state === 'copied' ? 'Copied' : 'Copy link'}</Button></div>
+      {state === 'copied' && <span className="sr-only" role="status">Invite link copied.</span>}
+      {state === 'blocked' && <InlineAlert variant="warn" title={COPY_BLOCKED} />}
+    </div>
+  );
+}
+
+const INVITATION_LABEL: Record<string, string> = { 'Not sent': 'Not sent', Sent: 'Invite sent', Accepted: 'Accepted', Expired: 'Invite expired' };
+
+/** One company: counts, settings and the owner. Never projects, money or the firm's other people. */
+function CompanySheet({ firm, onClose, onChanged, onStatus }: {
+  firm: PlatformFirm | null;
+  onClose: () => void;
+  onChanged: () => void;
+  onStatus: (kind: 'suspend' | 'reactivate', firm: PlatformFirm) => void;
+}) {
+  const [detail, setDetail] = useState<PlatformFirmDetail | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [error, setError] = useState('');
+  const [invite, setInvite] = useState<OwnerInvite | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const id = firm?.id;
+
+  const load = useCallback(async (firmId: string) => {
+    setState('loading');
+    try {
+      setDetail(await getFirm(firmId));
+      setState('ready');
+    } catch (e) {
+      setError(failureMessage(e));
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    setDetail(null); setInvite(null); setInviteError(null); setInviting(false);
+    if (id) void load(id);
+  }, [id, load]);
+
+  if (!firm) return null;
+  const shown = detail;
+  const status = shown?.status ?? firm.status;
+  const pendingOwner = !!shown && shown.owner_invitation_state !== 'Accepted' && !!shown.owner_email;
+  const canInvite = pendingOwner && shown?.status === 'Active';
+  const current: PlatformFirm = shown ? { ...firm, ...shown } : firm;
+
+  const newInvite = async () => {
+    setInviting(true);
+    setInviteError(null);
+    try {
+      setInvite(await reissueOwnerInvite(firm.id));
+      onChanged();
+      void load(firm.id);
+    } catch (e) {
+      setInviteError(failureMessage(e));
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const footer = (
+    <>
+      {status === 'Active'
+        ? <Button variant="danger" onClick={() => onStatus('suspend', current)}>Suspend</Button>
+        : <Button onClick={() => onStatus('reactivate', current)}>Reactivate</Button>}
+      <Button variant="primary" onClick={onClose}>Close</Button>
+    </>
+  );
+
+  return (
+    <Sheet open onClose={onClose} title={firm.trading_name} description="Company detail" size={480} footer={footer}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-5)' }}>
+        {state === 'loading' && <ListStateBlock state="loading" label="Company detail" rows={6} />}
+        {state === 'error' && <ListStateBlock state="error" label="Company detail" errorMessage={error} onRetry={() => void load(firm.id)} />}
+        {state === 'ready' && shown && (
+          <>
+            <div><StatusChip status={shown.status} /></div>
+            {shown.status === 'Suspended' && shown.suspended_reason && (
+              <InlineAlert variant="warn" title="Suspended">{shown.suspended_reason}</InlineAlert>
+            )}
+            <dl className="def-list">
+              {legalDiffers(shown) && <><dt>Legal name</dt><dd>{shown.legal_name}</dd></>}
+              <dt>Created</dt><dd className="t-numeric">{dateOf(shown.created_at)}</dd>
+              <dt>Timezone</dt><dd>{shown.timezone}</dd>
+              <dt>Currency</dt><dd>{shown.currency}</dd>
+              <dt>People</dt><dd className="t-numeric">{formatGrouped(shown.people)}</dd>
+              <dt>Active people</dt><dd className="t-numeric">{formatGrouped(shown.active_people)}</dd>
+              <dt>Last login</dt><dd className={shown.last_login_at ? 't-numeric' : undefined}>{shown.last_login_at ? dateTimeOf(shown.last_login_at) : 'Never'}</dd>
+            </dl>
+            <section aria-label="Owner" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+              <h3 className="t-label">Owner</h3>
+              <dl className="def-list">
+                <dt>Name</dt><dd>{shown.owner_name ?? 'Not set'}</dd>
+                <dt>Email</dt><dd>{shown.owner_email ?? 'Not set'}</dd>
+                <dt>Invitation</dt>
+                <dd>{shown.owner_invitation_state
+                  ? <StatusChip size="sm" status={shown.owner_invitation_state} label={INVITATION_LABEL[shown.owner_invitation_state]} />
+                  : 'None'}</dd>
+              </dl>
+              {inviteError && <InlineAlert variant="danger" title={inviteError} />}
+              {invite ? (
+                <>
+                  <InlineAlert variant="success" title="New invite link ready.">
+                    Send it to {shown.owner_name ?? 'the owner'}. It works once and expires on {dateTimeOf(invite.invite_expires_at)}. Earlier links no longer work.
+                  </InlineAlert>
+                  <InviteLinkField url={new URL(invite.invite_url, window.location.origin).toString()} />
+                  <InlineAlert variant="warn" title="Email delivery is not connected.">No email was sent. Share the link with the owner yourself.</InlineAlert>
+                </>
+              ) : canInvite ? (
+                <div><Button loading={inviting} onClick={() => void newInvite()}>New invite link</Button></div>
+              ) : pendingOwner ? (
+                <span className="t-body-sm ink-2">Reactivate the company to send the owner a new invite link.</span>
+              ) : null}
+            </section>
+          </>
+        )}
+      </div>
+    </Sheet>
   );
 }
 
@@ -195,11 +356,11 @@ function groupAudit(entries: PlatformAuditEntry[]): ActivityDay[] {
   for (const e of entries) {
     const day = dateOf(e.at);
     if (!days.has(day)) days.set(day, { day, events: [] });
-    const what = [e.action, e.firm_name].filter(Boolean).join(': ');
+    const what = describeAction(e);
     days.get(day)!.events.push({
       id: e.id,
       actor: e.admin_name,
-      action: e.reason ? `${what}. Reason: ${e.reason}` : what,
+      action: e.reason ? `${what} - ${e.reason}` : what,
       time: new Date(e.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
     });
   }
@@ -227,10 +388,9 @@ function AddCompanySheet({ open, onClose, onCreated }: { open: boolean; onClose:
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NewFirmResult | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const close = () => {
-    setForm(EMPTY_FIRM); setErrors({}); setFailure(null); setResult(null); setCopied(false); setBusy(false);
+    setForm(EMPTY_FIRM); setErrors({}); setFailure(null); setResult(null); setBusy(false);
     onClose();
   };
   const set = (k: keyof NewFirm, v: string) => { setForm((f) => ({ ...f, [k]: v })); setErrors((x) => ({ ...x, [k]: undefined })); };
@@ -255,9 +415,6 @@ function AddCompanySheet({ open, onClose, onCreated }: { open: boolean; onClose:
   };
 
   const inviteLink = result ? new URL(result.invite_url, window.location.origin).toString() : '';
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(inviteLink); setCopied(true); } catch { setCopied(false); }
-  };
 
   const dirty = !result && JSON.stringify(form) !== JSON.stringify(EMPTY_FIRM);
   const footer = result
@@ -274,9 +431,9 @@ function AddCompanySheet({ open, onClose, onCreated }: { open: boolean; onClose:
       {result ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
           <InlineAlert variant="success" title={`${form.trading_name.trim()} is ready.`}>Send this invite link to {form.owner_name.trim()}. It works once and expires on {dateTimeOf(result.invite_expires_at)}.</InlineAlert>
-          <TextField label="Invite link" value={inviteLink} readOnly mono />
-          <div><Button icon={<Copy size={16} strokeWidth={1.5} aria-hidden />} onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button></div>
+          <InviteLinkField url={inviteLink} />
           <InlineAlert variant="warn" title="Email delivery is not connected.">No email was sent. Share the link with the owner yourself.</InlineAlert>
+          <span className="t-body-sm ink-2">Lost the link? Open the company from the list and choose New invite link.</span>
         </div>
       ) : (
         <Form onSubmit={submit} aria-label="Add company" noValidate>

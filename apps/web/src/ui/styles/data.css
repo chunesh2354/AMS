@@ -36,7 +36,7 @@ button.queue:hover .queue__chevron, button.queue:focus-visible .queue__chevron {
 
 /* KpiTile */
 .kpi { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); height: 100%; }
-.kpi__label { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); }
+.kpi__label { font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); }
 .kpi__value { display: flex; align-items: baseline; gap: var(--s-1); min-height: 32px; }
 .kpi__num { font: var(--text-kpi); letter-spacing: var(--track-kpi); }
 .kpi__unit { font: var(--text-numeric); color: var(--ink-2); }
@@ -85,7 +85,7 @@ button.queue:hover .queue__chevron, button.queue:focus-visible .queue__chevron {
 
 /* ActivityFeed */
 .feed { display: flex; flex-direction: column; gap: var(--s-4); }
-.feed__day { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); margin-bottom: var(--s-2); }
+.feed__day { font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); margin-bottom: var(--s-2); }
 .feed__list { display: flex; flex-direction: column; gap: var(--s-3); }
 .feed__row { display: flex; gap: var(--s-2); font: var(--text-body-sm); align-items: flex-start; }
 .feed__body { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
@@ -134,7 +134,7 @@ button.queue:hover .queue__chevron, button.queue:focus-visible .queue__chevron {
 .dt th {
   position: sticky; top: 0; z-index: 2; height: var(--row-header); padding: 0 var(--s-3); text-align: left; white-space: nowrap;
   background: var(--surface); border-bottom: 1px solid var(--line-strong);
-  font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2);
+  font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2);
 }
 .dt td { height: var(--row-comfortable); padding: 0 var(--s-3); border-bottom: 1px solid var(--line); }
 .dt--dense td { height: var(--row-dense); }

@@ -11,11 +11,11 @@
   --text-h3: 600 15px/20px var(--font-sans);
   --text-body: 400 14px/21px var(--font-sans);
   --text-body-sm: 400 13px/19px var(--font-sans);
-  --text-label: 600 11px/16px var(--font-sans);    --track-label: 0.06em;
+  --text-label: 500 12px/16px var(--font-sans);    --track-label: -0.003em;
   --text-caption: 400 12px/16px var(--font-sans);
-  --text-numeric: 500 13px/18px var(--font-mono);
+  --text-numeric: 500 13px/18px var(--font-sans);
   --text-kpi: 700 30px/34px var(--font-sans);      --track-kpi: -0.035em;
-  --text-timer: 500 15px/20px var(--font-mono);
+  --text-timer: 600 15px/20px var(--font-sans);
 
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
   --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
@@ -58,8 +58,8 @@
     radial-gradient(900px 600px at 8% -8%, rgba(0,113,227,0.10), transparent 62%),
     radial-gradient(800px 560px at 96% 4%, rgba(175,82,222,0.08), transparent 60%),
     radial-gradient(900px 700px at 70% 112%, rgba(255,149,0,0.07), transparent 62%);
-  --glass-1: rgba(255,255,255,0.64);
-  --glass-2: rgba(255,255,255,0.80);
+  --glass-1: rgba(255,255,255,0.74);
+  --glass-2: rgba(255,255,255,0.86);
   --glass-edge-in: rgba(255,255,255,0.95);
   --glass-edge-out: rgba(0,0,0,0.06);
   --surface: #ffffff;
@@ -91,8 +91,8 @@
       radial-gradient(900px 600px at 8% -8%, rgba(41,151,255,0.16), transparent 62%),
       radial-gradient(800px 560px at 96% 4%, rgba(191,90,242,0.12), transparent 60%),
       radial-gradient(900px 700px at 70% 112%, rgba(255,159,10,0.07), transparent 62%);
-    --glass-1: rgba(30,30,34,0.56);
-    --glass-2: rgba(38,38,42,0.76);
+    --glass-1: rgba(30,30,34,0.66);
+    --glass-2: rgba(38,38,42,0.80);
     --glass-edge-in: rgba(255,255,255,0.10);
     --glass-edge-out: rgba(255,255,255,0.06);
     --surface: #1c1c1e;
@@ -122,8 +122,8 @@
     radial-gradient(900px 600px at 8% -8%, rgba(41,151,255,0.16), transparent 62%),
     radial-gradient(800px 560px at 96% 4%, rgba(191,90,242,0.12), transparent 60%),
     radial-gradient(900px 700px at 70% 112%, rgba(255,159,10,0.07), transparent 62%);
-  --glass-1: rgba(30,30,34,0.56);
-  --glass-2: rgba(38,38,42,0.76);
+  --glass-1: rgba(30,30,34,0.66);
+  --glass-2: rgba(38,38,42,0.80);
   --glass-edge-in: rgba(255,255,255,0.10);
   --glass-edge-out: rgba(255,255,255,0.06);
   --surface: #1c1c1e;

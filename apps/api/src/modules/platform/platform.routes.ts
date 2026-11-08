@@ -11,7 +11,8 @@ import { isUuid, required } from '../../http/validation';
  * SECURITY DEFINER functions (migrations 002 and 003); the ams_app role has no grant on the platform tables.
  * Since 003 every platform action takes the session token hash and the database resolves the admin from it,
  * so no admin id is ever passed except to platform_create_session right after the password is verified.
- * Firm data never crosses this boundary: the firm list carries counts only.
+ * Firm data never crosses this boundary: the firm list carries counts only. The company detail (004) adds only
+ * the owner's name, email and invitation state, so the platform can hand over a new invite link.
  */
 export const PLATFORM_COOKIE = 'ams_platform';
 export const PLATFORM_PREFIX = '/api/v1/platform/';
@@ -165,6 +166,44 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
     }
     const firmId = row?.firm_id;
     return { firm_id: firmId, invite_url: `/accept-invite/${token}`, invite_expires_at: expires.toISOString(), email_sent: false };
+  });
+
+  // One company: still counts only, plus the owner's name, email and invitation state (migration 004).
+  const detailOf = async (tokenHash: string, id: string | undefined) => {
+    if (!isUuid(id)) throw notFound('Firm');
+    const r = (await query('select * from platform_firm_detail($1, $2)', [tokenHash, id])).rows[0];
+    if (!r) throw notFound('Firm');
+    // Explicit allow-list, as for the list.
+    return {
+      id: r.id,
+      trading_name: r.trading_name,
+      legal_name: r.legal_name,
+      status: r.status,
+      suspended_reason: r.suspended_reason ?? null,
+      timezone: r.timezone,
+      currency: r.currency,
+      created_at: iso(r.created_at),
+      people: Number(r.people ?? 0),
+      active_people: Number(r.active_people ?? 0),
+      last_login_at: iso(r.last_login_at),
+      owner_name: r.owner_name ?? null,
+      owner_email: r.owner_email ?? null,
+      owner_invitation_state: r.owner_invitation_state ?? null,
+    };
+  };
+
+  app.get('/api/v1/platform/firms/:id', secured, async (req) =>
+    detailOf(adminOf(req).tokenHash, (req.params as { id?: string }).id));
+
+  /** A new owner invite link, while the owner has not accepted. Earlier links stop working. */
+  app.post('/api/v1/platform/firms/:id/owner-invite', secured, async (req) => {
+    const admin = adminOf(req);
+    const id = (req.params as { id?: string }).id;
+    await detailOf(admin.tokenHash, id);
+    const token = newToken();
+    const expires = new Date(Date.now() + INVITE_HOURS * 3600_000);
+    await query('select platform_reissue_owner_invite($1, $2, $3, $4)', [admin.tokenHash, id, hashToken(token), expires]);
+    return { invite_url: `/accept-invite/${token}`, invite_expires_at: expires.toISOString(), email_sent: false };
   });
 
   const setStatus = (status: 'Active' | 'Suspended') => async (req: FastifyRequest) => {

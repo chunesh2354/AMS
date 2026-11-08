@@ -13,7 +13,7 @@
   position: sticky; left: 0; z-index: 2; display: flex; align-items: center; gap: var(--s-2); min-width: 0; padding: 0 var(--s-3);
   background: var(--surface); border-bottom: 1px solid var(--line); border-right: 1px solid var(--line-strong);
 }
-.plan__row--head .plan__rowhead { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); }
+.plan__row--head .plan__rowhead { font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); }
 .plan__rowtext { display: flex; flex-direction: column; min-width: 0; }
 .plan__rowtext > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan__h { display: flex; align-items: center; justify-content: space-between; gap: var(--s-1); padding: 0 var(--s-2); background: var(--surface); border-left: 1px solid var(--line); }
@@ -59,7 +59,7 @@
 .ring__track { stroke: var(--neutral-soft); }
 .ring__value { stroke: var(--ok); stroke-linecap: round; }
 .ring--over .ring__value { stroke: var(--warn); }
-.ring__text { font: 500 11px/14px var(--font-mono); letter-spacing: -0.04em; }
+.ring__text { font: 500 11px/14px var(--font-sans); letter-spacing: -0.04em; }
 .ring--over .ring__text { color: var(--warn-ink); }
 
 /* TimesheetGrid */
@@ -67,7 +67,7 @@
 .ts:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .ts table { width: 100%; border-collapse: separate; border-spacing: 0; font: var(--text-body-sm); }
 .ts th { font-weight: 400; text-align: left; }
-.ts thead th { height: var(--row-header); padding: 0 var(--s-2); font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+.ts thead th { height: var(--row-header); padding: 0 var(--s-2); font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
 .ts__line { position: sticky; left: 0; z-index: 1; width: 280px; min-width: 200px; padding: var(--s-2) var(--s-3) !important; background: var(--surface); border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
 .ts__day { text-align: right !important; min-width: 64px; }
 .ts__day .t-numeric { text-transform: none; letter-spacing: 0; font-size: 12px; }
@@ -223,13 +223,13 @@
 .dt--tight td:first-child, .dt--tight th:first-child { padding-left: var(--s-3); }
 .dt__row--click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; box-shadow: none; }
 .dt__row--active > * { background: var(--accent-soft) !important; }
-.t-code-title { font: 600 17px/24px var(--font-mono); }
+.t-code-title { font: 600 17px/24px var(--font-sans); }
 .chart__bars { display: grid; align-items: end; gap: var(--s-2); height: 80px; border-bottom: 1px solid var(--line-strong); }
 .chart__bars .tip-anchor { display: flex; align-items: flex-end; justify-content: center; height: 100%; min-width: 0; }
 .chart__bar { display: block; width: 100%; max-width: 48px; border-radius: 4px 4px 0 0; }
 .chart__barlabels { display: grid; gap: var(--s-2); margin-top: var(--s-1); font: var(--text-caption); color: var(--ink-2); text-align: center; }
 .chart__barlabels span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.taskline__due { font: 500 12px/16px var(--font-mono); white-space: nowrap; }
+.taskline__due { font: 500 12px/16px var(--font-sans); white-space: nowrap; }
 @media (max-width: 767px) {
   .taskline { grid-template-columns: minmax(0, 1fr); }
   .taskline__meta, .taskline__actions { justify-content: flex-start; }

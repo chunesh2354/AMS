@@ -36,7 +36,7 @@
 
 /* Field shell */
 .field { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
-.field__label { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); }
+.field__label { font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); }
 .field__help { font: var(--text-caption); color: var(--ink-2); }
 .field__error { font: var(--text-caption); color: var(--danger-ink); }
 .field__control {
@@ -76,7 +76,7 @@ textarea.field__input { padding: var(--s-2) 0; resize: vertical; min-height: 80p
 .option[data-active='true'] { background: var(--accent-soft); }
 .option[aria-selected='true'] { font-weight: 500; }
 .option__check { margin-left: auto; color: var(--accent-text); }
-.options__group { padding: var(--s-2) var(--s-2) var(--s-1); font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-2); }
+.options__group { padding: var(--s-2) var(--s-2) var(--s-1); font: var(--text-label); letter-spacing: var(--track-label); color: var(--ink-2); }
 .options__empty { padding: var(--s-3); font: var(--text-body-sm); color: var(--ink-2); }
 .tag {
   display: inline-flex; align-items: center; gap: var(--s-1); height: 24px; padding: 0 var(--s-2);
