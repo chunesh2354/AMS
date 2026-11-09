@@ -211,6 +211,27 @@ describe('rate limiting per account', () => {
     expect((await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'other@meridian.demo', password: 'wrong-password-123' }, headers: from(30) })).statusCode).toBe(401);
   });
 
+  const login = (email: string, password: string, ip: number) =>
+    app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email, password }, headers: from(ip) }).then((r) => r.statusCode);
+
+  it('only failed attempts count: correct sign-ins never use up the allowance, and a success clears earlier failures', async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 6; i++) codes.push(await login('p03@meridian.demo', 'meridian-demo-2026', 80 + i));
+    expect(codes).toEqual([200, 200, 200, 200, 200, 200]);
+    // Two failures, then a success clears them: two more failures still do not reach the limit of 3.
+    expect([await login('p03@meridian.demo', 'wrong-password-123', 90), await login('p03@meridian.demo', 'wrong-password-123', 91)]).toEqual([401, 401]);
+    expect(await login('p03@meridian.demo', 'meridian-demo-2026', 92)).toBe(200);
+    expect([await login('p03@meridian.demo', 'wrong-password-123', 93), await login('p03@meridian.demo', 'wrong-password-123', 94)]).toEqual([401, 401]);
+  });
+
+  it('wrong passwords from elsewhere cannot lock the owner out on an address they signed in from before', async () => {
+    expect(await login('p05@meridian.demo', 'meridian-demo-2026', 100)).toBe(200); // the owner's usual address
+    for (let i = 0; i < 3; i++) expect(await login('p05@meridian.demo', 'wrong-password-123', 110 + i)).toBe(401); // an attacker
+    expect(await login('p05@meridian.demo', 'wrong-password-123', 120)).toBe(429); // the attacker is now blocked
+    expect(await login('p05@meridian.demo', 'meridian-demo-2026', 121)).toBe(429); // so is any unknown address
+    expect(await login('p05@meridian.demo', 'meridian-demo-2026', 100)).toBe(200); // the owner still gets in
+  });
+
   it('platform login counts separately from firm login, per email', async () => {
     const codes: number[] = [];
     for (let i = 0; i < 4; i++) codes.push((await app.inject({ method: 'POST', url: '/api/v1/platform/auth/login', payload: { email: 'target@meridian.demo', password: 'wrong-password-123' }, headers: from(40 + i) })).statusCode);

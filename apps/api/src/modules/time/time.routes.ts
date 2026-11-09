@@ -50,11 +50,15 @@ async function assertDayRoom(tx: Tx, personId: string, date: string, adding: num
   if (t + adding > 24) throw ruleError('F10', `A day cannot hold more than 24 h. ${date} would have ${(t + adding).toFixed(2)} h.`, [{ field: 'duration_hours', code: 'over_24h' }]);
 }
 
-async function classify(tx: Tx, body: any) {
+async function classify(tx: Tx, body: any, actor: Actor) {
   if (body.phase_id && body.internal_category_id) throw ruleError('R2', 'A line is either project work or internal work, never both.');
   if (!body.phase_id) return { project_id: null, phase_id: null, fee_component_id: null };
-  const ph = (await tx.query('select id, project_id from phase where id = $1', [body.phase_id])).rows[0];
+  const ph = (await tx.query('select ph.id, ph.project_id, pr.pm_id, pr.principal_id from phase ph join project pr on pr.id = ph.project_id where ph.id = $1', [body.phase_id])).rows[0];
   if (!ph) throw notFound('Phase');
+  // Only the project's team (and its PM and principal) can record time on it, even with a known phase id.
+  if (!actor.memberProjects.includes(ph.project_id) && ph.pm_id !== actor.id && ph.principal_id !== actor.id) {
+    throw new ApiError(403, 'NOT_PROJECT_MEMBER', "You are not on this project's team. Ask the project manager to add you.");
+  }
   return { project_id: ph.project_id, phase_id: ph.id, fee_component_id: await resolveFeeComponent(tx, ph.id, body.fee_component_id) };
 }
 
@@ -63,7 +67,7 @@ async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any) {
   const duration = Number(body.duration_hours);
   if (!(duration > 0)) throw new ApiError(400, 'VALIDATION', 'Duration must be above zero.', [{ field: 'duration_hours', code: 'range' }]);
   await assertDayRoom(tx, actor.id, date, duration);
-  const c = await classify(tx, body);
+  const c = await classify(tx, body, actor);
   const ts = await ensureTimesheet(tx, firmId, actor.id, date);
   // R11: no budget, cap or NTE check happens here, by design. Actual work can always be recorded.
   return (await tx.query(
@@ -144,7 +148,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const e = (await tx.query('select * from time_entry where id = $1', [id])).rows[0];
     if (!e || e.person_id !== actor.id) throw notFound('Time entry');
     if (!['Draft', 'Returned'].includes(e.approval_state)) throw conflict('LOCKED', 'Submitted or approved hours cannot be edited. Request a correction instead.');
-    const c = 'phase_id' in body || 'internal_category_id' in body ? await classify(tx, body) : e;
+    const c = 'phase_id' in body || 'internal_category_id' in body ? await classify(tx, body, actor) : e;
     const duration = body.duration_hours ?? e.duration_hours;
     await assertDayRoom(tx, actor.id, e.service_date, Number(duration), [id]);
     await tx.query(
@@ -254,7 +258,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     if (!body.phase_id && !body.internal_category_id) throw ruleError('F10', 'A timer needs a project phase or an internal category.');
     const running = await tx.query('select id from timer where person_id = $1 and ended_at is null', [actor.id]);
     if (running.rowCount) throw conflict('TIMER_RUNNING', 'A timer is already running.', { conflicting_id: running.rows[0].id });
-    const c = await classify(tx, body);
+    const c = await classify(tx, body, actor);
     const t = (await tx.query(
       `insert into timer (firm_id, person_id, project_id, phase_id, internal_category_id, created_by) values ($1,$2,$3,$4,$5,$2) returning id, started_at`,
       [firmId, actor.id, c.project_id, c.phase_id, body.internal_category_id ?? null],

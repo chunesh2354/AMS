@@ -236,8 +236,9 @@ describe('AT-10 and time entry rules', () => {
   it('more than 24 h in a day is 422', async () => {
     const { call, f } = { call: c.f.call, f: c.f };
     const wd = await phaseId(f, 'PRJ-01', 'WD');
-    expect((await call('P07', 'POST', '/time-entries', { service_date: '2026-11-20', duration_hours: 20, phase_id: wd })).status).toBe(200);
-    const r = await call('P07', 'POST', '/time-entries', { service_date: '2026-11-20', duration_hours: 5, phase_id: wd });
+    // P08 is on the PRJ-01 team; only team members can log time on a project.
+    expect((await call('P08', 'POST', '/time-entries', { service_date: '2026-11-20', duration_hours: 20, phase_id: wd })).status).toBe(200);
+    const r = await call('P08', 'POST', '/time-entries', { service_date: '2026-11-20', duration_hours: 5, phase_id: wd });
     expect(r.status).toBe(422);
     expect(r.body.error.details[0].code).toBe('over_24h');
   });

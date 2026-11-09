@@ -276,3 +276,30 @@ describe('POST /rates validates the person', () => {
     expect(r.status).toBe(200);
   });
 });
+
+describe('only the project team can record time on it', () => {
+  it('refuses a non-member and a removed member, even with a known phase id, on every way of logging time', async () => {
+    expect((await f.call('P01', 'POST', '/projects', project('PRJ-60', { principal_id: f.id('P01'), members: [{ person_id: f.id('P05'), role: 'contributor' }] }))).status).toBe(200);
+    const cd = await phaseOf('PRJ-60', 'CD');
+
+    // P06 was never on the team.
+    const outsider = await f.call('P06', 'POST', '/time-entries', { service_date: '2026-10-06', duration_hours: 2, phase_id: cd });
+    expect(outsider.status).toBe(403);
+    expect(outsider.body.error.code).toBe('NOT_PROJECT_MEMBER');
+    expect((await f.call('P06', 'PUT', '/me/time/cell', { service_date: '2026-10-06', duration_hours: 2, phase_id: cd })).status).toBe(403);
+    expect((await f.call('P06', 'POST', '/timers/start', { phase_id: cd })).status).toBe(403);
+
+    // P05 can log time while on the team, and not after being removed.
+    expect((await f.call('P05', 'POST', '/time-entries', { service_date: '2026-10-06', duration_hours: 2, phase_id: cd })).status).toBe(200);
+    expect((await f.call('P02', 'DELETE', `/projects/PRJ-60/members/${f.id('P05')}`)).status).toBe(200);
+    const removed = await f.call('P05', 'POST', '/time-entries', { service_date: '2026-10-07', duration_hours: 2, phase_id: cd });
+    expect(removed.status).toBe(403);
+    expect(removed.body.error.code).toBe('NOT_PROJECT_MEMBER');
+
+    // The PM and the project principal can always record time on their project; nothing extra was written.
+    expect((await f.call('P02', 'POST', '/time-entries', { service_date: '2026-10-08', duration_hours: 1, phase_id: cd })).status).toBe(200);
+    expect((await f.call('P01', 'POST', '/time-entries', { service_date: '2026-10-08', duration_hours: 1, phase_id: cd })).status).toBe(200);
+    const rows = (await f.owner.query('select count(*)::int as n from time_entry where phase_id = $1', [cd])).rows[0].n;
+    expect(rows).toBe(3);
+  });
+});
