@@ -63,6 +63,13 @@ export function buildApp(connectionString: string, opts: { secureCookie?: boolea
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Something went wrong on our side.', details: [] } });
   });
 
+  // Fastify's own 404 writes the raw URL to the log and the reply, and an unmatched URL can still carry a token
+  // (e.g. /api/v1/auth/reset/<token>/ with a trailing slash). Ours logs only the scrubbed URL and answers in the standard shape.
+  app.setNotFoundHandler((req, reply) => {
+    req.log.info({ method: req.method, url: scrubUrl(req.url) }, 'route not found');
+    return reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'This address was not found.', details: [] } });
+  });
+
   const wrap = (h: Handler) => async (req: FastifyRequest, reply: FastifyReply) => {
     const actor = req.actor;
     if (!actor) throw new ApiError(401, 'UNAUTHENTICATED', 'Please sign in.');

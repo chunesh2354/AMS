@@ -5,11 +5,11 @@ import { audit } from '../../audit/audit';
 import { authorize, can } from '../../auth/authorize';
 import { hashToken, newToken } from '../../auth/sessions';
 import { list, money } from '../../http/responses';
-import { required, uuidParam } from '../../http/validation';
+import { isUuid, required, uuidParam } from '../../http/validation';
 import { withFirm } from '../../db/pool';
 import { SESSION_COOKIE } from '../../auth/sessions';
 import type { Api } from '../../http/api';
-import { assertPassword } from '../accounts/accounts.routes';
+import { assertPassword, revokeOpenLinks } from '../accounts/accounts.routes';
 
 const SESSION_DAYS = 14;
 const DUMMY_HASH = hash('not-a-real-password');
@@ -100,6 +100,9 @@ export function authRoutes(api: Api, opts: { secureCookie?: boolean }) {
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$7) returning id`,
       [firmId, personId, setId, capability ?? null, scope_type, scope_id ?? null, actor.id, reason ?? null, sensitive],
     )).rows[0];
+    // Same rule as PUT /accounts/:id/types: an open invite or reset link may be held by a non-principal, so once the
+    // account holds a sensitive grant those links stop working.
+    if (sensitive) await revokeOpenLinks(tx, personId, actor.id);
     const audit_event_id = await audit(tx, actor, firmId, { recordType: 'permission_grant', recordId: row.id, action: 'grant', next: { person_id: personId, permission_set: setKey, capability, scope_type, scope_id }, reason });
     return { id: row.id, audit_event_id };
   });
@@ -145,6 +148,10 @@ export function authRoutes(api: Api, opts: { secureCookie?: boolean }) {
   post('/rates', async ({ tx, actor, firmId, body }) => {
     required(body, ['person_id', 'rate_type', 'amount', 'effective_from', 'change_reason']);
     authorize(actor, body.rate_type === 'cost' ? 'rates.cost.manage' : 'rates.bill.manage', { projectId: body.project_id });
+    // Validate references first: an unknown id (or another firm's, which RLS hides) is a 404, never a foreign-key 500.
+    if (!['bill', 'cost'].includes(body.rate_type)) throw new ApiError(400, 'VALIDATION', 'A rate is a bill rate or a cost rate.', [{ field: 'rate_type', code: 'enum' }]);
+    if (!isUuid(body.person_id) || !(await tx.query('select 1 from person where id = $1', [body.person_id])).rowCount) throw notFound('Person');
+    if (body.project_id != null && (!isUuid(body.project_id) || !(await tx.query('select 1 from project where id = $1', [body.project_id])).rowCount)) throw notFound('Project');
     // Close the version in force the day before. Past versions are never rewritten.
     const prev = (await tx.query(
       `update rate_schedule set effective_to = $4::date - 1, updated_by = $5, updated_at = now()

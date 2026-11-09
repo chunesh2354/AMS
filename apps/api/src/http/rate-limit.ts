@@ -4,16 +4,24 @@
  * Matched by method and the route Fastify dispatched to (not the raw URL, which a client can percent-encode
  * or otherwise vary while still reaching the same handler), so the route files need no changes.
  *
- * Defaults: 10 requests per minute per client IP per endpoint. Configure with AUTH_RATE_LIMIT_MAX and
- * AUTH_RATE_LIMIT_WINDOW_MS (0 turns it off). Off in tests unless a test passes buildApp({ rateLimit }).
- * The client IP comes from X-Forwarded-For only when the request arrives from loopback (Caddy).
+ * Two limits, both must pass:
+ * - per client IP per endpoint: 10 requests per minute by default (AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS;
+ *   0 turns both limits off). The client IP comes from X-Forwarded-For only when the request arrives from loopback (Caddy).
+ * - per target account per endpoint, whatever IP the attempts come from, so one account cannot be brute-forced
+ *   from many addresses: the lower-cased email for firm and platform login, the token for accept-invite and the
+ *   reset routes, the signed-in person for the password change. 30 per 15 minutes by default
+ *   (AUTH_ACCOUNT_RATE_LIMIT_MAX, AUTH_ACCOUNT_RATE_LIMIT_WINDOW_MS; 0 turns this one off). Tokens are keyed by
+ *   their hash, never kept raw.
+ * Off in tests unless a test passes buildApp({ rateLimit }); the per-account limit only with rateLimit.account.
  */
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { hashToken } from '../auth/sessions';
 import { ApiError } from './errors';
 import { isTestRun, scrubUrl } from './logging';
 
-export type RateLimitOptions = { max: number; windowMs: number } | false;
+type Limit = { max: number; windowMs: number };
+export type RateLimitOptions = (Limit & { account?: Limit | false }) | false;
 
 const EXACT = new Set([
   'POST /api/v1/auth/login',
@@ -32,23 +40,76 @@ export function limitBucket(req: Pick<FastifyRequest, 'method' | 'url'> & { rout
   return null;
 }
 
-function settings(opt?: RateLimitOptions): { max: number; windowMs: number } | null {
+const envLimit = (maxVar: string, windowVar: string, max: number, windowMs: number): Limit | null => {
+  const m = Number(process.env[maxVar] ?? max);
+  const w = Number(process.env[windowVar] ?? windowMs);
+  return m > 0 && w > 0 ? { max: m, windowMs: w } : null;
+};
+
+function settings(opt?: RateLimitOptions): { ip: Limit; account: Limit | null } | null {
   if (opt === false) return null;
-  if (opt) return opt;
+  if (opt) return { ip: { max: opt.max, windowMs: opt.windowMs }, account: opt.account || null };
   if (isTestRun()) return null;
-  const max = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10);
-  const windowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000);
-  return max > 0 && windowMs > 0 ? { max, windowMs } : null;
+  const ip = envLimit('AUTH_RATE_LIMIT_MAX', 'AUTH_RATE_LIMIT_WINDOW_MS', 10, 60_000);
+  if (!ip) return null;
+  return { ip, account: envLimit('AUTH_ACCOUNT_RATE_LIMIT_MAX', 'AUTH_ACCOUNT_RATE_LIMIT_WINDOW_MS', 30, 15 * 60_000) };
 }
 
-/** Register the limiter and its onRequest hook. Call before other onRequest hooks so it runs first. */
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+
+/** The account an attempt targets, or null when the request names none (it then counts against the IP limit only). */
+export function accountKey(req: Pick<FastifyRequest, 'method' | 'url' | 'body' | 'params'> & { routeOptions?: { url?: string }; actor?: { id: string } | null }): string | null {
+  const bucket = limitBucket(req);
+  if (!bucket) return null;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const params = (req.params ?? {}) as Record<string, unknown>;
+  let key: string | null = null;
+  if (bucket === '/api/v1/auth/login' || bucket === '/api/v1/platform/auth/login') {
+    const email = str(body.email);
+    key = email && `email:${email.trim().toLowerCase()}`;
+  } else if (bucket === '/api/v1/auth/accept-invite') {
+    const token = str(body.token);
+    key = token && `token:${hashToken(token)}`;
+  } else if (bucket === RESET) {
+    const token = str(params.token) ?? str(body.token);
+    key = token && `token:${hashToken(token)}`;
+  } else if (bucket === '/api/v1/me/password') {
+    key = req.actor?.id ? `person:${req.actor.id}` : null;
+  }
+  return key && `${bucket}|${key}`;
+}
+
+/** A fixed-window counter per key, kept in memory and bounded (oldest keys dropped first). */
+export class WindowCounter {
+  private hits = new Map<string, { n: number; start: number }>();
+  constructor(private limit: Limit, private capacity = 10_000) {}
+  /** Count one attempt; returns the seconds to wait when the limit is used up, otherwise null. */
+  hit(key: string, now = Date.now()): number | null {
+    let h = this.hits.get(key);
+    if (!h || now - h.start >= this.limit.windowMs) {
+      this.hits.delete(key);
+      h = { n: 0, start: now };
+    }
+    h.n += 1;
+    this.hits.set(key, h);
+    while (this.hits.size > this.capacity) this.hits.delete(this.hits.keys().next().value as string);
+    return h.n > this.limit.max ? Math.max(1, Math.ceil((h.start + this.limit.windowMs - now) / 1000)) : null;
+  }
+}
+
+const tooMany = (seconds: number) => {
+  const after = seconds >= 60 ? `${Math.ceil(seconds / 60)} minute${Math.ceil(seconds / 60) === 1 ? '' : 's'}` : `${seconds} second${seconds === 1 ? '' : 's'}`;
+  return new ApiError(429, 'RATE_LIMITED', `Too many attempts. Please try again in ${after}.`, [], { retry_after_seconds: seconds });
+};
+
+/** Register the limiters and their hooks. Call before other onRequest hooks so the IP limit runs first. */
 export function authRateLimit(app: FastifyInstance, opt?: RateLimitOptions) {
   const s = settings(opt);
   if (!s) return;
   app.register(rateLimit, {
     global: false,
-    max: s.max,
-    timeWindow: s.windowMs,
+    max: s.ip.max,
+    timeWindow: s.ip.windowMs,
     keyGenerator: (req) => `${req.ip}|${limitBucket(req)}`,
     onExceeded: (req) => { req.log.warn({ url: scrubUrl(req.url) }, 'rate limit exceeded'); },
     errorResponseBuilder: (_req, ctx) =>
@@ -59,5 +120,20 @@ export function authRateLimit(app: FastifyInstance, opt?: RateLimitOptions) {
     if (!limitBucket(req)) return;
     limiter ??= app.rateLimit();
     await limiter.call(this, req, reply);
+  });
+
+  // The account key needs the parsed body (email, token), so this one runs once the body is read.
+  const account = s.account;
+  if (!account) return;
+  const counter = new WindowCounter(account);
+  app.addHook('preValidation', async (req, reply) => {
+    const key = accountKey(req);
+    if (!key) return;
+    const wait = counter.hit(key);
+    if (wait === null) return;
+    // The key itself (an email or a token hash) is not logged.
+    req.log.warn({ url: scrubUrl(req.url), bucket: limitBucket(req), limit: 'account' }, 'rate limit exceeded');
+    reply.header('retry-after', String(wait));
+    throw tooMany(wait);
   });
 }

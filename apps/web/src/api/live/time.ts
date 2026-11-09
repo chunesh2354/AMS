@@ -94,3 +94,27 @@ export const stopTimer = () => apiFetch<{ time_entry_id: string }>('/timers/stop
 
 /** ISO date of grid column `c` in the period starting `period`. */
 export const cellDate = (period: string, c: number) => iso(new Date(parse(period).getTime() + c * 86400000));
+
+/** The studio's calendar date (YYYY-MM-DD) in `timeZone`, so a late-evening entry in Bengaluru is not filed under the UTC date. */
+export function todayIn(timeZone = 'Asia/Kolkata', now: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  } catch {
+    // An unknown zone name from the server: fall back to the studio default rather than crash the sheet.
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  }
+}
+
+/** GET /timers/active: the person's one running timer, or null. */
+export type ApiActiveTimer = { id: string; started_at: string; phase_name: string | null; project_code: string | null; internal_category_id: string | null };
+export type ActiveTimerState = { elapsed: number; context: string };
+
+/** Seconds since the timer started and the label the timer pill shows. Null when nothing is running. */
+export function timerFromActive(active: ApiActiveTimer | null | undefined, now: Date = new Date()): ActiveTimerState | null {
+  if (!active?.started_at) return null;
+  const started = Date.parse(active.started_at);
+  if (Number.isNaN(started)) return null;
+  const context = !active.project_code ? 'Internal work' : active.phase_name ? `${active.project_code} · ${active.phase_name}` : active.project_code;
+  return { elapsed: Math.max(0, Math.floor((now.getTime() - started) / 1000)), context };
+}
+export const getActiveTimer = async () => (await apiFetch<{ active: ApiActiveTimer | null }>('/timers/active'))?.active ?? null;

@@ -31,4 +31,6 @@ Never created in production.
 - API: `npm --prefix apps/api test` (embedded Postgres on 54331 via `test/global-setup.ts`).
 - Web unit: `npm --prefix apps/web test`.
 - Web Playwright, mock: build first (`npm --prefix apps/web run build` and `build-storybook`), then `npm --prefix apps/web run test:e2e`.
-- Web Playwright, live: `cd apps/web && npx playwright test -c playwright.live.config.ts` (throwaway Postgres on 54332, API on 3001, UI on 4273).
+- Web Playwright, live: `npm run test:e2e:live` from the repo root, or `cd apps/web && npx playwright test -c playwright.live.config.ts` (throwaway Postgres on 54332, API on 3001, UI on 4273).
+  - Screenshots go to `apps/web/test-results/` (git-ignored) on every run, so a run leaves the tracked files alone.
+  - To refresh the tracked `docs/ui-screens/live-*.png`, set `UPDATE_LIVE_SCREENSHOTS=1`: `UPDATE_LIVE_SCREENSHOTS=1 npm run test:e2e:live` (PowerShell: `$env:UPDATE_LIVE_SCREENSHOTS='1'; npm run test:e2e:live`). Commit the changed images on purpose.

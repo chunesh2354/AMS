@@ -12,6 +12,7 @@ import { findProject } from '../projects/projects.routes';
 import { routeApprover } from '../approvals/approvals.routes';
 import { adapterFor, AdapterTimeout, type AdapterResult } from '../integrations/adapters/accounting';
 import type { Api } from '../../http/api';
+import { feeAuthorizationRoutes } from './authorizations.routes';
 
 type Source = { type: 'time_entry' | 'supplier_bill' | 'milestone' | 'percent_claim'; id: string; amount: number };
 export type ReadyItem = {
@@ -228,7 +229,9 @@ async function finalize(tx: Tx, actor: Actor, firmId: string, d: any, result: Ad
   return inv;
 }
 
-export function billingRoutes({ get, post, put }: Api) {
+export function billingRoutes(api: Api) {
+  const { get, post, put } = api;
+  feeAuthorizationRoutes(api);
   /** Firm-wide for finance and principals; a PM sees only their own projects. Staff are refused. */
   const scopeOf = async (tx: Tx, actor: Actor, projectCode?: string) => {
     if (projectCode) {

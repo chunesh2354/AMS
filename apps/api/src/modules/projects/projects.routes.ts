@@ -4,11 +4,12 @@ import { assertProjectVisible, authorize, can, visibleProjects } from '../../aut
 import { audit } from '../../audit/audit';
 import { fenceAggregate } from '../../auth/redaction';
 import { hours, list, money } from '../../http/responses';
-import { required, uuidParam } from '../../http/validation';
+import { isUuid, moneyAmount, required, uuidParam } from '../../http/validation';
 import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
 import { setupRoutes } from './setup.routes';
+import { assertPeopleExist, memberRoutes, MEMBER_ROLES, type MemberRole } from './members.routes';
 
 export const ACTUAL_SQL = `(approval_state = 'Approved' or (approval_state = 'Amended' and billing_state = 'Billed'))`;
 
@@ -95,9 +96,75 @@ export async function projectView(tx: Tx, p: any, actor: Actor) {
   };
 }
 
+const BILLING_METHODS = ['fixed_milestone', 'fixed_percent', 'hourly', 'hourly_nte', 'percent_construction', 'consultant_recharge'];
+const FIXED = ['fixed_percent', 'fixed_milestone'];
+const bad = (field: string, code: string, message: string) => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
+
+/**
+ * Phase fees for a fixed fee. Each is a number of at least zero; when any is given they must add up to the
+ * contracted fee (in paise, so rounding cannot hide a gap). Returns the contracted amount to store.
+ */
+function feeAllocations(body: any): string | number | null {
+  const contracted = body.contracted_amount == null || body.contracted_amount === '' ? null : Number(body.contracted_amount);
+  if (contracted != null && !(Number.isFinite(contracted) && contracted >= 0)) throw bad('contracted_amount', 'range', 'The contracted fee must be zero or more.');
+  // Within the money column and at most two decimals, so a huge or fractional-paise amount is a 400, not a database error.
+  if (contracted != null) moneyAmount(contracted, 'contracted_amount', 'The contracted fee');
+  const fees = (body.phases as any[]).map((ph) => ph?.fee);
+  fees.forEach((f, i) => {
+    if (f != null && !(typeof f === 'number' || (typeof f === 'string' && f.trim() !== ''))) throw bad(`phases[${i}].fee`, 'number', 'A phase fee must be a number.');
+    if (f != null && !(Number.isFinite(Number(f)) && Number(f) >= 0)) throw bad(`phases[${i}].fee`, 'range', 'A phase fee must be zero or more.');
+    if (f != null) moneyAmount(f, `phases[${i}].fee`, 'A phase fee');
+  });
+  const given = fees.filter((f) => f != null);
+  if (!given.length) return contracted;
+  if (!FIXED.includes(body.billing_method) && given.some((f) => Number(f) > 0)) throw bad('phases', 'fee_not_fixed', 'Phase fees apply to a fixed fee only.');
+  const sum = given.reduce((s, f) => s + toPaise(Number(f)), 0);
+  if (contracted == null) return FIXED.includes(body.billing_method) ? fromPaise(sum) : null;
+  if (FIXED.includes(body.billing_method) && sum !== toPaise(contracted)) {
+    throw new ApiError(400, 'VALIDATION', `The phase fees add up to ${fromPaise(sum)}, not the contracted fee of ${fromPaise(toPaise(contracted))}.`, [{ field: 'phases', code: 'fee_sum' }]);
+  }
+  return contracted;
+}
+
+/** Percent of construction cost: above 0, at most 100, at most four decimals (numeric(7,4)). */
+function feePercent(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n <= 0 || n > 100) throw bad('fee_percent', 'range', 'The fee percent is above 0 and at most 100.');
+  if (Math.abs(n * 10_000 - Math.round(n * 10_000)) > 1e-6) throw bad('fee_percent', 'precision', 'The fee percent can have at most four decimals.');
+  return n;
+}
+
+/** The team from the wizard: [{ person_id, role }], role defaulting to contributor. */
+function membersOf(body: any): { person_id: string; role: MemberRole }[] {
+  if (body.members == null) return [];
+  if (!Array.isArray(body.members)) throw bad('members', 'array', 'The team must be a list of people.');
+  const seen = new Set<string>();
+  const out: { person_id: string; role: MemberRole }[] = [];
+  body.members.forEach((m: any, i: number) => {
+    const role = m?.role ?? 'contributor';
+    if (!m || typeof m.person_id !== 'string') throw bad(`members[${i}].person_id`, 'required', 'Each team member needs a person.');
+    if (!MEMBER_ROLES.includes(role)) throw bad(`members[${i}].role`, 'enum', `A team role is one of ${MEMBER_ROLES.join(', ')}.`);
+    if (seen.has(m.person_id)) return;
+    seen.add(m.person_id);
+    out.push({ person_id: m.person_id, role });
+  });
+  return out;
+}
+
+/** The creating principal, else the firm's first active principal (so a PM's own time has someone to go to). */
+async function defaultPrincipal(tx: Tx, actor: Actor): Promise<string | null> {
+  if (actor.sets.includes('principal')) return actor.id;
+  const r = (await tx.query(
+    `select g.person_id from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id
+     where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state = 'Active' order by p.ref_code limit 1`,
+  )).rows[0];
+  return r?.person_id ?? null;
+}
+
 export function projectRoutes(api: Api) {
   const { get, post, put } = api;
   setupRoutes(api);
+  memberRoutes(api);
   get('/projects', async ({ tx, actor, req }) => {
     const v = visibleProjects(actor);
     const rows = (await tx.query(
@@ -127,18 +194,32 @@ export function projectRoutes(api: Api) {
     required(body, ['code', 'name', 'client_id', 'pm_id', 'billing_method', 'phases']);
     if (!Array.isArray(body.phases) || !body.phases.length) throw ruleError('F06', 'A project needs at least one phase.');
     if (body.billing_method === 'hourly_nte' && body.cap_amount == null) throw ruleError('F07', 'An hourly NTE component needs a cap.');
+    if (!BILLING_METHODS.includes(body.billing_method)) throw new ApiError(400, 'VALIDATION', 'Choose a fee basis.', [{ field: 'billing_method', code: 'enum' }]);
+    if (body.cap_amount != null) moneyAmount(body.cap_amount, 'cap_amount', 'The cap', { positive: true });
+    if (body.fee_percent != null) feePercent(body.fee_percent);
+    const contracted = feeAllocations(body);
+    const members = membersOf(body);
+    if (!isUuid(body.client_id) || !(await tx.query('select 1 from client where id = $1', [body.client_id])).rowCount) throw bad('client_id', 'unknown', 'Choose a client from this studio.');
+    await assertPeopleExist(tx, [body.pm_id], 'pm_id');
+    const principalId = body.principal_id ?? await defaultPrincipal(tx, actor);
+    if (principalId) await assertPeopleExist(tx, [principalId], 'principal_id');
+    await assertPeopleExist(tx, members.map((m) => m.person_id), 'members');
     const dup = await tx.query('select id from project where code = $1', [body.code]);
     if (dup.rowCount) throw conflict('DUPLICATE_CODE', `Project ${body.code} already exists.`, { conflicting_id: dup.rows[0].id });
     const p = (await tx.query(
       `insert into project (firm_id, code, name, client_id, pm_id, principal_id, contract_summary, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
-      [firmId, body.code, body.name, body.client_id, body.pm_id, body.principal_id ?? null, body.contract_summary ?? null, actor.id],
+      [firmId, body.code, body.name, body.client_id, body.pm_id, principalId, body.contract_summary ?? null, actor.id],
     )).rows[0];
     await tx.query(`insert into project_membership (firm_id, project_id, person_id, project_role, created_by) values ($1,$2,$3,'pm',$4)`, [firmId, p.id, body.pm_id, actor.id]);
+    // The team picked in the wizard, so staff can see the project and log time on it from day one.
+    for (const m of members.filter((x) => x.person_id !== body.pm_id)) {
+      await tx.query(`insert into project_membership (firm_id, project_id, person_id, project_role, created_by) values ($1,$2,$3,$4,$5)`, [firmId, p.id, m.person_id, m.role, actor.id]);
+    }
     const cv = (await tx.query(`insert into contract_version (firm_id, project_id, version_no, effective_from, created_by) values ($1,$2,1,current_date,$3) returning id`, [firmId, p.id, actor.id])).rows[0];
     const fc = (await tx.query(
       `insert into fee_component (firm_id, contract_version_id, project_id, key, name, billing_method, contracted_amount, fee_percent, cap_amount, created_by)
        values ($1,$2,$3,'main',$4,$5,$6,$7,$8,$9) returning id`,
-      [firmId, cv.id, p.id, body.fee_name ?? 'Design services', body.billing_method, body.contracted_amount ?? null, body.fee_percent ?? null, body.cap_amount ?? null, actor.id],
+      [firmId, cv.id, p.id, body.fee_name ?? 'Design services', body.billing_method, contracted, body.fee_percent ?? null, body.cap_amount ?? null, actor.id],
     )).rows[0];
     const bv = (await tx.query(`insert into budget_version (firm_id, project_id, version_no, kind, created_by) values ($1,$2,1,'baseline',$3) returning id`, [firmId, p.id, actor.id])).rows[0];
     let order = 0;
@@ -151,8 +232,8 @@ export function projectRoutes(api: Api) {
       await tx.query(`insert into phase_fee_allocation (firm_id, phase_id, fee_component_id, amount, created_by) values ($1,$2,$3,$4,$5)`, [firmId, row.id, fc.id, ph.fee ?? 0, actor.id]);
       if (ph.budget_hours != null) await tx.query(`insert into budget_line (firm_id, budget_version_id, phase_id, hours, created_by) values ($1,$2,$3,$4,$5)`, [firmId, bv.id, row.id, ph.budget_hours, actor.id]);
     }
-    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'project', recordId: p.id, action: 'create', next: { code: body.code, name: body.name } });
-    return { id: p.id, code: body.code, audit_event_id };
+    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'project', recordId: p.id, action: 'create', next: { code: body.code, name: body.name, principal_id: principalId, members: members.length } });
+    return { id: p.id, code: body.code, principal_id: principalId, audit_event_id };
   });
 
   /** R8: delivery progress is entered by a PM. Logging hours never touches it. */

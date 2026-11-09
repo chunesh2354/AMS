@@ -8,11 +8,15 @@ import type { MenuItem } from '../ui/Menu';
 
 const i = { size: 20, strokeWidth: 1.5, 'aria-hidden': true } as const;
 
-export const FIRM_NAV: NavSection[] = [
+/** The mock's Approvals count. Live mode passes the real count (or nothing) to firmNav instead. */
+export const MOCK_APPROVALS_BADGE = 14;
+
+/** The firm navigation. `approvalsBadge` is the pending count; leave it out to show no badge. */
+export const firmNav = (approvalsBadge?: number): NavSection[] => [
   { label: 'Work', items: [
     { to: '/firm/overview', label: 'Overview', icon: <LayoutDashboard {...i} /> },
     { to: '/firm/projects', label: 'Projects', icon: <FolderKanban {...i} /> },
-    { to: '/firm/approvals', label: 'Approvals', icon: <Inbox {...i} />, badge: 14 },
+    { to: '/firm/approvals', label: 'Approvals', icon: <Inbox {...i} />, badge: approvalsBadge },
   ] },
   { label: 'People', items: [
     { to: '/firm/people', label: 'People', icon: <Users {...i} /> },
@@ -26,6 +30,9 @@ export const FIRM_NAV: NavSection[] = [
   { label: 'Insights', items: [{ to: '/firm/reports/utilization', label: 'Reports', icon: <ChartColumn {...i} /> }] },
   { label: 'Settings', items: [{ to: '/firm/settings/profile', label: 'Settings', icon: <SlidersHorizontal {...i} /> }] },
 ];
+
+/** The mock build's navigation, with the sample Approvals count. */
+export const FIRM_NAV: NavSection[] = firmNav(MOCK_APPROVALS_BADGE);
 
 export const TEAM_NAV: NavSection[] = [
   { items: [
@@ -54,10 +61,10 @@ export const teamTabs = (go: (to: string) => void): TabItem[] => {
 };
 
 /** Section 11: Approvals and Overview stay usable on a phone; everything else is under More. */
-export const firmTabs = (go: (to: string) => void): TabItem[] => [
+export const firmTabs = (go: (to: string) => void, nav: NavSection[] = FIRM_NAV): TabItem[] => [
   { label: 'Overview', to: '/firm/overview', icon: <LayoutDashboard {...i} /> },
   { label: 'Approvals', to: '/firm/approvals', icon: <Inbox {...i} /> },
-  { label: 'More', icon: <Ellipsis {...i} />, menu: FIRM_NAV.flatMap((s) => s.items)
+  { label: 'More', icon: <Ellipsis {...i} />, menu: nav.flatMap((s) => s.items)
     .filter((n) => !['/firm/overview', '/firm/approvals'].includes(n.to))
     .map((n) => ({ label: n.label, onSelect: () => go(n.to) })) },
 ];

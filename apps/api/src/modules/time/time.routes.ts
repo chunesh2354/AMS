@@ -6,7 +6,7 @@ import { isoDate, required, uuidParam } from '../../http/validation';
 import { notify } from '../../audit/notify';
 import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
-import { routeApprover, resolvePersonApprover } from '../approvals/approvals.routes';
+import { projectTimeApprover, routeApprover, resolvePersonApprover } from '../approvals/approvals.routes';
 import type { Api } from '../../http/api';
 
 async function ensureTimesheet(tx: Tx, firmId: string, personId: string, date: string) {
@@ -186,8 +186,8 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const created: string[] = [];
     for (const [k, list_] of groups) {
       const first = list_[0];
-      const designated = k === 'internal' ? await resolvePersonApprover(tx, actor.id) : first.pm_id === actor.id ? (first.principal_id ?? first.pm_id) : first.pm_id;
-      const approver = await routeApprover(tx, designated, actor.id);
+      // A PM's own project time goes to the project principal, then the firm fallback: never back to the PM.
+      const approver = k === 'internal' ? await routeApprover(tx, await resolvePersonApprover(tx, actor.id), actor.id) : await projectTimeApprover(tx, first, actor.id);
       const flags = list_.some((e) => overDays.has(e.service_date)) ? ['over_12h_day'] : [];
       const ar = (await tx.query(
         `insert into approval_request (firm_id, type, record_type, record_id, project_id, submitter_id, approver_id, exception_flags, created_by)
@@ -230,8 +230,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Submitted',$11,$12,$13,$2) returning id`,
       [firmId, actor.id, e.service_date, e.project_id, e.phase_id, e.internal_category_id, e.fee_component_id, newDuration, body.note ?? e.note, e.timesheet_id, e.internal_category_id ? 'Non-billable' : 'Unbilled', id, body.reason],
     )).rows[0];
-    const designated = e.project_id ? (e.pm_id === actor.id ? (e.principal_id ?? e.pm_id) : e.pm_id) : await resolvePersonApprover(tx, actor.id);
-    const approver = await routeApprover(tx, designated, actor.id);
+    const approver = e.project_id ? await projectTimeApprover(tx, e, actor.id) : await routeApprover(tx, await resolvePersonApprover(tx, actor.id), actor.id);
     const ar = (await tx.query(
       `insert into approval_request (firm_id, type, record_type, record_id, project_id, submitter_id, approver_id, exception_flags, created_by)
        values ($1,$2,'timesheet',$3,$4,$5,$6,$7,$5) returning id`,

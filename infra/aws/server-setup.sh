@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # One-time setup of the single staging server (Ubuntu 24.04, arm64). Run as root, usually from EC2 user data.
-# Installs PostgreSQL, Node 22 and Caddy, creates the database and secrets, then calls deploy.sh.
+# Installs PostgreSQL, Node 22 and Caddy, creates the database and secrets, installs the server files
+# (install-server-files.sh, the same step every deploy runs), then calls deploy.sh.
 # Safe to run again: every step checks what already exists.
 #
-# Required environment: AMS_DOMAIN, AMS_BACKUP_BUCKET, AWS_REGION. Optional: AMS_REPO, AMS_BRANCH.
+# Required environment: AMS_DOMAIN, AMS_BACKUP_BUCKET, AWS_REGION.
+# Optional: AMS_REPO, AMS_BRANCH, AMS_ALERT_TOPIC_ARN (the ams-alerts SNS topic from provision.sh).
 set -euo pipefail
 
 : "${AMS_DOMAIN:?set AMS_DOMAIN, e.g. app.csdv.in}"
@@ -17,6 +19,16 @@ ENV_FILE=/etc/ams/env
 export DEBIAN_FRONTEND=noninteractive
 
 log() { echo "[ams-setup] $*"; }
+
+# Set KEY=VALUE in /etc/ams/env, replacing an existing line for KEY.
+set_env() {
+  local key="$1" value="$2" tmp
+  tmp=$(mktemp "${ENV_FILE}.new.XXXXXX")
+  grep -v "^${key}=" "$ENV_FILE" > "$tmp" || true
+  echo "${key}=${value}" >> "$tmp"
+  chown root:ams "$tmp" && chmod 640 "$tmp"
+  mv -f "$tmp" "$ENV_FILE"
+}
 
 # 2 GB swap so npm install and the web build fit on a 2 GB instance.
 if ! swapon --show | grep -q /swapfile; then
@@ -69,6 +81,12 @@ EOF
   umask 022
 fi
 chown root:ams "$ENV_FILE" && chmod 640 "$ENV_FILE"
+# Where backup and deploy failures are sent (ams-alert). Also set on existing servers by rerunning provision.sh.
+if [ -n "${AMS_ALERT_TOPIC_ARN:-}" ]; then
+  set_env AMS_ALERT_TOPIC_ARN "$AMS_ALERT_TOPIC_ARN"
+elif ! grep -q '^AMS_ALERT_TOPIC_ARN=' "$ENV_FILE"; then
+  log "WARNING: AMS_ALERT_TOPIC_ARN is not set; backup and deploy failures will only be logged (rerun provision.sh)"
+fi
 set -a; . "$ENV_FILE"; set +a
 owner_pw=$(echo "$AMS_OWNER_URL" | sed -E 's|^postgres://ams_owner:([^@]+)@.*$|\1|')
 
@@ -90,23 +108,13 @@ if [ ! -d "$APP_DIR/.git" ]; then
   git clone --branch "$AMS_BRANCH" "$AMS_REPO" "$APP_DIR"
 fi
 chown -R ams:ams "$APP_DIR"
-git config --system --add safe.directory "$APP_DIR"
+git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$APP_DIR" || git config --system --add safe.directory "$APP_DIR"
 
 log "installing services"
-install -m 644 "$APP_DIR/infra/aws/ams-api.service" /etc/systemd/system/ams-api.service
-sed "s|{\$AMS_DOMAIN}|${AMS_DOMAIN}|g" "$APP_DIR/infra/aws/Caddyfile" > /etc/caddy/Caddyfile
-install -m 755 "$APP_DIR/infra/aws/backup.sh" /usr/local/bin/ams-backup
-install -m 755 "$APP_DIR/infra/aws/restore.sh" /usr/local/bin/ams-restore
-install -m 755 "$APP_DIR/infra/aws/deploy.sh" /usr/local/bin/ams-deploy
-install -m 755 "$APP_DIR/infra/aws/create-platform-admin.sh" /usr/local/bin/ams-create-platform-admin
-install -m 755 "$APP_DIR/infra/aws/set-platform-admin-password.sh" /usr/local/bin/ams-set-platform-admin-password
-cat > /etc/cron.d/ams-backup <<'EOF'
-# Nightly database backup to S3 at 02:30 server time (UTC).
-30 2 * * * root /usr/local/bin/ams-backup >> /var/log/ams-backup.log 2>&1
-EOF
-systemctl daemon-reload
+# Commands, backup cron file (with PATH), systemd unit + daemon-reload, validated Caddyfile + reload.
+# deploy.sh runs the same script on every deploy.
+APP_DIR="$APP_DIR" bash "$APP_DIR/infra/aws/install-server-files.sh"
 systemctl enable ams-api caddy
 
 /usr/local/bin/ams-deploy
-systemctl reload caddy || systemctl restart caddy
 log "done: https://${AMS_DOMAIN} (HTTPS starts once DNS points here)"

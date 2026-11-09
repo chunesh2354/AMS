@@ -2,7 +2,14 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 
 const PASSWORD = 'meridian-demo-2026';
 const NEW_PASSWORD = 'studio-invite-2026';
-const shot = (page: Page, name: string) => page.screenshot({ path: `../../docs/ui-screens/live-${name}.png`, fullPage: true });
+/**
+ * The tracked docs/ui-screens/live-*.png change only when asked: UPDATE_LIVE_SCREENSHOTS=1 (run from apps/web).
+ * Otherwise each shot goes to this test's folder under test-results, which git ignores.
+ */
+const shot = (page: Page, name: string) => page.screenshot({
+  path: process.env.UPDATE_LIVE_SCREENSHOTS === '1' ? `../../docs/ui-screens/live-${name}.png` : test.info().outputPath(`live-${name}.png`),
+  fullPage: true,
+});
 const dark = async (page: Page, name: string) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   // Controls animate their colours; capture only once every theme transition has finished.

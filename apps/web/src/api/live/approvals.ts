@@ -120,3 +120,9 @@ export function batchMessage(r: { approved: string[]; skipped: unknown[] }): str
   const s = r.skipped.length;
   return `${r.approved.length} approved.${s ? ` ${s} skipped.` : ''}`;
 }
+
+/** How many approvals wait on the signed-in person: the `total` of GET /approvals (Pending by default), one row fetched. */
+export async function pendingApprovalCount(): Promise<number> {
+  const res = await apiFetch<ListResponse<LiveApproval>>('/approvals?status=Pending&page_size=1');
+  return Number(res.total) || 0;
+}

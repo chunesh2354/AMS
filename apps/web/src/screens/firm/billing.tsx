@@ -24,6 +24,8 @@ const TABS = [
   { key: 'ready', label: 'Ready to bill' }, { key: 'drafts', label: 'Drafts' }, { key: 'exceptions', label: 'Exceptions' }, { key: 'wip', label: 'WIP' }, { key: 'accounting', label: 'Accounting' },
 ];
 const projectLabel = (r: { project: string; projectName: string }) => `${r.project} ${r.projectName}`;
+/** Live drafts carry the preparer's name from the server; only the mock stores a person ref to look up. Never 'None' for a real name. */
+export const preparedByName = (d: Pick<BillingDraft, 'preparedBy'>, live = isLive) => (live ? d.preparedBy || 'Not set' : personName(d.preparedBy));
 type WipRow = { project: string; name: string; entitled: number; invoiced: number };
 
 const readyColumns: Column<ReadyItem>[] = [
@@ -79,7 +81,7 @@ function DraftDetail({ draft, onSubmit, actions, alert }: { draft: BillingDraft;
       <div className="toolbar toolbar--between">
         <div className="stacked">
           <span className="toolbar"><h2 id="draft-title" className="t-code-title">{draft.id}</h2><StatusChip size="sm" status={draft.status} /></span>
-          <span className="t-body-sm ink-2">{projectLabel(draft)} · Prepared by {personName(draft.preparedBy)}</span>
+          <span className="t-body-sm ink-2">{projectLabel(draft)} · Prepared by {preparedByName(draft)}</span>
         </div>
         {actions ?? <Button variant="primary" disabled={draft.status !== 'Approved'} onClick={onSubmit}>Submit to accounting</Button>}
       </div>
@@ -158,7 +160,7 @@ export function BillingScreen() {
   const draftColumns: Column<BillingDraft>[] = [
     { key: 'id', header: 'Draft', value: (d) => d.id, render: (d) => <span className="t-numeric">{d.id}</span> },
     { key: 'project', header: 'Project', value: projectLabel },
-    { key: 'by', header: 'Prepared by', type: 'person', value: (d) => personName(d.preparedBy) },
+    { key: 'by', header: 'Prepared by', type: 'person', value: (d) => preparedByName(d) },
     { key: 'amount', header: 'Amount', type: 'money', value: (d) => d.amount },
     { key: 'status', header: 'Status', type: 'status', value: (d) => d.status },
   ];

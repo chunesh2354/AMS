@@ -52,6 +52,21 @@ async function currentTypes(tx: Tx, personId: string): Promise<AccountType[]> {
   return sortTypes(rows.map((r) => SET_TO_TYPE[r.key]).filter(Boolean));
 }
 
+/**
+ * Whoever holds an invite or reset link can set the password, so only a principal may issue one for a sensitive account:
+ * a principal or finance account type, or any grant marked sensitive (a sensitive set or a single sensitive capability).
+ */
+async function isSensitiveAccount(tx: Tx, personId: string): Promise<boolean> {
+  if ((await currentTypes(tx, personId)).some((t) => SENSITIVE_TYPES.includes(t))) return true;
+  return Boolean((await tx.query('select 1 from permission_grant where person_id = $1 and sensitive limit 1', [personId])).rowCount);
+}
+
+/** Open invite and reset links stop working: used when an account becomes sensitive. */
+export async function revokeOpenLinks(tx: Tx, personId: string, actorId: string) {
+  await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actorId]);
+  await revokeResetLinks(tx, personId, actorId);
+}
+
 /** Section 5.3 rule 8: the last active principal keeps principal and keeps access. */
 async function assertNotLastPrincipal(tx: Tx, personId: string) {
   const others = (await tx.query(
@@ -186,10 +201,7 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
       );
     }
     // An unused invite link may be held by a non-principal; once the account becomes sensitive, that link must stop working.
-    if (added.some((t) => SENSITIVE_TYPES.includes(t))) {
-      await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actor.id]);
-      await revokeResetLinks(tx, personId, actor.id);
-    }
+    if (added.some((t) => SENSITIVE_TYPES.includes(t))) await revokeOpenLinks(tx, personId, actor.id);
     const audit_event_id = await audit(tx, actor, firmId, {
       recordType: 'person', recordId: personId, action: 'set_account_types', previous: { account_types: before }, next: { account_types: types, added, removed },
     });
@@ -204,9 +216,8 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     if (p.invitation_state === 'Accepted') throw conflict('INVITE_ALREADY_ACCEPTED', 'This person has already accepted an invitation.');
     if (p.login_state !== 'Enabled') throw ruleError('accounts.invite', 'Reactivate this account before sending a new invitation.');
     // Whoever holds the link can set the password, so only a principal may hold a link to a principal or finance account.
-    const types = await currentTypes(tx, personId);
-    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
-      await refuse(actor, firmId, personId, 'Only a principal can invite a principal or finance account.', { action: 'invite' });
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can invite a principal, finance or other sensitive account.', { action: 'invite' });
     }
     const invite = await issueInvite(tx, firmId, personId, actor.id);
     await audit(tx, actor, firmId, { recordType: 'person', recordId: personId, action: 'reinvite', next: { invitation_state: 'Sent', invite_expires_at: invite.invite_expires_at } });
@@ -262,10 +273,11 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     const personId = uuidParam(params.id, 'Account');
     const p = (await tx.query('select id, invitation_state, login_state from person where id = $1', [personId])).rows[0];
     if (!p) throw notFound('Account');
-    const types = await currentTypes(tx, personId);
-    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
-      await refuse(actor, firmId, personId, 'Only a principal can reset the password of a principal or finance account.', { action: 'reset_link' });
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can reset the password of a principal, finance or other sensitive account.', { action: 'reset_link' });
     }
+    // A link for yourself would let a signed-in session set a new password without knowing the current one.
+    if (personId === actor.id) throw ruleError('accounts.reset', 'You cannot issue a reset link for your own account. Use Change password instead.');
     if (p.invitation_state !== 'Accepted') throw ruleError('accounts.reset', 'This person has not accepted their invitation yet. Send a new invitation instead.');
     if (p.login_state !== 'Enabled') throw ruleError('accounts.reset', 'Reactivate this account before issuing a password reset link.');
     await revokeResetLinks(tx, personId, actor.id);

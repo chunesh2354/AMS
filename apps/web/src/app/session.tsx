@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { hasFinanceAccess } from '../api/access';
 import { ApiFailure, apiFetch, failureMessage, isLive } from '../api/live';
+import { firmFromMe, type ApiMeFirm, type LiveFirm } from '../api/live/shell';
+import { getActiveTimer, timerFromActive } from '../api/live/time';
 import type { Role } from '../api/types';
 import { PEOPLE } from '../mock/studio-meridian';
 import { ErrorState } from '../ui/ErrorState';
@@ -17,6 +19,8 @@ export type Viewer = {
   id: string; name: string; title: string; roles: Role[];
   /** Live mode only: the person's database id, the server's capability map and the project ids they lead. */
   personId?: string; capabilities?: Record<string, CapabilityLevel>; ledProjects?: string[];
+  /** Live mode only: the firm the person signed in to (name, time zone, currency), from GET /me. */
+  firm?: LiveFirm;
 };
 
 export const VIEWERS: Viewer[] = ['P01', 'P02', 'P04', 'P08', 'P10'].map((id) => {
@@ -36,6 +40,14 @@ export function can(viewer: Viewer, capability: string, opts?: { firmWide?: bool
   const level = viewer.capabilities?.[capability];
   return opts?.firmWide ? level === 'firm' : !!level;
 }
+/**
+ * Settings > Rates: exactly those the server lets read the rate card (GET /rates needs rates.bill.manage or
+ * rates.cost.view, firm-wide). Finance holds both; operations holds neither by default, so it would only get a 403.
+ */
+export const canSeeRates = (v: Viewer) => can(v, 'rates.bill.manage', { firmWide: true }) || can(v, 'rates.cost.view', { firmWide: true });
+/** Who may open Settings at all: the settings roles, plus anyone who may see Rates (they get that section only). */
+export const canOpenSettings = (v: Viewer) => canUseSettings(v) || canSeeRates(v);
+
 /** can() bound to the current viewer. */
 export function useCan() {
   const { viewer } = useSession();
@@ -80,7 +92,7 @@ function MockSessionProvider({ children, initialViewer }: ProviderProps) {
 
 export type MeResponse = {
   person: { id: string; ref_code: string; name: string; work_email: string; job_title: string | null; manager_id: string | null };
-  firm: { id: string; trading_name: string; legal_name: string; currency: string; timezone: string; accounting_adapter: string };
+  firm: ApiMeFirm & { accounting_adapter: string };
   permission_sets: Role[];
   capabilities: Record<string, CapabilityLevel>;
   led_projects: string[];
@@ -95,6 +107,7 @@ export const viewerFromMe = (me: MeResponse): Viewer => ({
   personId: me.person.id,
   capabilities: me.capabilities,
   ledProjects: me.led_projects,
+  firm: firmFromMe(me.firm),
 });
 
 const NO_VIEWER: Viewer = { id: '', name: '', title: '', roles: [] };
@@ -128,7 +141,7 @@ function LiveSessionProvider({ children }: { children: ReactNode }) {
 
   if (error) return <main className="solid-panel"><ErrorState message={error} onRetry={() => { setError(null); setAttempt((n) => n + 1); }} /></main>;
   if (!value) return <main style={{ padding: 'var(--s-6)' }}><Skeleton kind="table" rows={8} /></main>;
-  return <Ctx.Provider value={value}><TimerState viewerId={value.viewer.id}>{children}</TimerState></Ctx.Provider>;
+  return <Ctx.Provider value={value}><TimerState viewerId={value.viewer.personId ?? ''} live>{children}</TimerState></Ctx.Provider>;
 }
 
 export function useSession() {
@@ -140,11 +153,27 @@ export function useSession() {
 export type Timer = { running: boolean; elapsed: number; context: string; start: (context?: string) => void; stop: () => void };
 const TimerCtx = createContext<Timer | null>(null);
 
-/** The one running timer, shared by the top bar and My time. Rohan Shetty starts with one running at 01:42. */
-function TimerState({ viewerId, children }: { viewerId: string; children: ReactNode }) {
-  const [running, setRunning] = useState(viewerId === 'P04');
-  const [elapsed, setElapsed] = useState(viewerId === 'P04' ? 6120 : 0);
-  const [context, setContext] = useState('PRJ-01 · Concept design');
+/** The mock's running timer: Rohan Shetty starts with one at 01:42. Live mode never shows it, since ref codes repeat across firms. */
+const MOCK_TIMER = { viewerId: 'P04', elapsed: 6120, context: 'PRJ-01 · Concept design' };
+
+/**
+ * The one running timer, shared by the top bar and My time.
+ * Live mode starts idle and asks GET /timers/active, so the pill shows the person's real timer or nothing.
+ */
+function TimerState({ viewerId, live = false, children }: { viewerId: string; live?: boolean; children: ReactNode }) {
+  const demo = !live && viewerId === MOCK_TIMER.viewerId;
+  const [running, setRunning] = useState(demo);
+  const [elapsed, setElapsed] = useState(demo ? MOCK_TIMER.elapsed : 0);
+  const [context, setContext] = useState(live ? '' : MOCK_TIMER.context);
+  useEffect(() => {
+    if (!live || !viewerId) return;
+    let current = true;
+    getActiveTimer().then((active) => {
+      const t = timerFromActive(active);
+      if (current && t) { setElapsed(t.elapsed); setContext(t.context); setRunning(true); }
+    }, () => { /* No timer state is not an error worth a banner: the pill stays idle. */ });
+    return () => { current = false; };
+  }, [live, viewerId]);
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);

@@ -12,11 +12,14 @@ import { useToast } from '../ui/Toast';
 import { formatDate, toISO } from '../ui/format';
 import { useMediaQuery } from '../ui/useMediaQuery';
 import type { MenuItem } from '../ui/Menu';
-import { FIRM_NAV, TEAM_NAV, firmTabs, teamTabs } from '../app/nav';
-import { VIEWERS, canUseFirm, useSession, useTimer } from '../app/session';
+import { FIRM_NAV, TEAM_NAV, firmNav, firmTabs, teamTabs } from '../app/nav';
+import { VIEWERS, canUseFirm, useSession, useTimer, type Viewer } from '../app/session';
 import { OverlaysProvider, useOverlays } from '../app/overlays';
 import { getNotifications } from '../api';
 import { CONNECTED_ROUTES, SAMPLE_DATA_NOTICE, apiFetch, failureMessage, isLive, signOut, type ListResponse } from '../api/live';
+import { pendingApprovalCount } from '../api/live/approvals';
+import { approvalsBadge } from '../api/live/shell';
+import { stopTimer } from '../api/live/time';
 import { FIRM_NAME } from '../mock/studio-meridian';
 
 const isMac = /mac/i.test(navigator.platform);
@@ -43,6 +46,9 @@ const PHONE_OK_ROUTES = ['/firm/overview', '/firm/approvals'];
 const readBannerDismissed = () => { try { return localStorage.getItem(PHONE_BANNER_KEY) === '1'; } catch { return false; } };
 const isConnectedRoute = (pathname: string) => CONNECTED_ROUTES.some((path) => matchPath({ path, end: true }, pathname));
 
+/** The brand in the side nav: the signed-in firm in live mode (never the sample studio), the sample studio in the mock. */
+export const brandFor = (viewer: Viewer, live = isLive) => (live ? viewer.firm?.name ?? '' : FIRM_NAME);
+
 /** Real shell around both route trees: navigation, top bar, palette, notifications and the mock view-as switch. */
 export function ShellLayout({ iface }: { iface: 'firm' | 'team' }) {
   return <OverlaysProvider><Shell iface={iface} /></OverlaysProvider>;
@@ -54,6 +60,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [collapsedByUser, setCollapsedByUser] = useState(false);
   const [notifications, setNotifications] = useState<NotificationGroup[]>(() => (isLive ? [] : getNotifications()));
+  const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
   const { pathname } = useLocation();
   const toast = useToast();
   const timer = useTimer();
@@ -77,6 +84,15 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
     return () => { current = false; };
   }, [toast]);
 
+  // Live: the Approvals badge is the person's real queue. If the count cannot be read the badge is hidden, never guessed.
+  useEffect(() => {
+    if (!isLive || !canUseFirm(viewer)) return;
+    let current = true;
+    pendingApprovalCount().then((n) => { if (current) setPendingApprovals(n); }, () => { if (current) setPendingApprovals(null); });
+    return () => { current = false; };
+  }, [viewer, pathname]);
+  const firmSections = useMemo(() => (isLive ? firmNav(approvalsBadge(pendingApprovals)) : FIRM_NAV), [pendingApprovals]);
+
   const markAllRead = async () => {
     if (isLive) {
       try { await apiFetch('/notifications/read-all', { method: 'POST' }); } catch (e) { toast({ variant: 'danger', message: failureMessage(e) }); return; }
@@ -87,7 +103,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
   const firmAllowed = canUseFirm(viewer);
   const actions = useMemo<PaletteAction[]>(() => {
     const go = (to: string) => () => navigate(to);
-    const navItems = [...(firmAllowed ? FIRM_NAV : []), ...TEAM_NAV].flatMap((s) => s.items);
+    const navItems = [...(firmAllowed ? firmSections : []), ...TEAM_NAV].flatMap((s) => s.items);
     return [
       { id: 'log', label: 'Log time', group: 'Actions', onSelect: () => openLogTime() },
       { id: 'leave', label: 'Request leave', group: 'Actions', onSelect: openLeave },
@@ -95,6 +111,9 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
       ...(firmAllowed ? [
         { id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/people?add=1') },
         { id: 'new-project', label: 'Create project', group: 'Create', onSelect: go('/firm/projects?new=1') },
+      ] : []),
+      // Sample people and projects: mock only, so live mode never offers a jump to a record that is not in this firm.
+      ...(firmAllowed && !isLive ? [
         { id: 'p2', label: 'Vikram Nair', group: 'People', meta: 'Project architect', onSelect: go('/firm/people/P02') },
         { id: 'p5', label: 'Divya Menon', group: 'People', meta: 'Architect', onSelect: go('/firm/people/P05') },
         { id: 'prj1', label: 'PRJ-01 Lakeview Residence', group: 'Projects', meta: 'Active', onSelect: go('/firm/projects/PRJ-01') },
@@ -102,7 +121,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
         { id: 'prj3', label: 'PRJ-03 Heritage Cafe Refit', group: 'Projects', meta: 'On hold', onSelect: go('/firm/projects/PRJ-03') },
       ] : []),
     ];
-  }, [navigate, firmAllowed, openLogTime, openLeave]);
+  }, [navigate, firmAllowed, firmSections, openLogTime, openLeave]);
 
   // Light only for now: the theme choice is gone from the account menu (session.tsx forces light).
   const menuItems: MenuItem[] = [
@@ -117,7 +136,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
     ? () => { signOut().catch((e: unknown) => toast({ variant: 'danger', message: failureMessage(e) })); }
     : () => navigate('/login');
 
-  const tabs = iface === 'firm' && firmAllowed ? firmTabs(navigate) : teamTabs(navigate);
+  const tabs = iface === 'firm' && firmAllowed ? firmTabs(navigate, firmSections) : teamTabs(navigate);
   const showFirmNav = iface === 'firm' && firmAllowed;
   const sampleBanner = isLive && !isConnectedRoute(pathname) ? <InlineAlert variant="warn" title={SAMPLE_DATA_NOTICE} /> : undefined;
   const phoneBanner = phone && showFirmNav && !bannerDismissed && !PHONE_OK_ROUTES.some((path) => matchPath({ path, end: false }, pathname))
@@ -130,8 +149,8 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
         interface={iface}
         sideNav={
           <SideNav
-            brand={FIRM_NAME}
-            sections={showFirmNav ? FIRM_NAV : TEAM_NAV}
+            brand={brandFor(viewer)}
+            sections={showFirmNav ? firmSections : TEAM_NAV}
             collapsed={collapsed}
             onToggleCollapsed={narrow ? undefined : () => setCollapsedByUser((c) => !c)}
             switcher={firmAllowed ? { value: iface, onChange: (v) => navigate(v === 'firm' ? '/firm/overview' : '/me/home') } : undefined}
@@ -149,8 +168,8 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
                 state={timer.running ? 'running' : 'idle'}
                 elapsedSeconds={timer.elapsed}
                 context={timer.context}
-                onStart={() => timer.start()}
-                onStop={timer.stop}
+                onStart={isLive ? () => openLogTime() : () => timer.start()}
+                onStop={isLive ? () => { stopTimer().then(timer.stop, (e: unknown) => toast({ variant: 'danger', message: failureMessage(e) })); } : timer.stop}
               />
             }
           />

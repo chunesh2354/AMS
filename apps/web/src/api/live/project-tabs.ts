@@ -3,9 +3,9 @@
  * Each one reads the API's own shape and maps it to the shape the tab already renders, plus the names
  * the mock looks up from its own people list (a real firm's people are not in the mock).
  */
-import { ApiFailure, apiFetch, hoursOf, type ListResponse, type Restricted } from '../live';
+import { ApiFailure, apiFetch, hoursOf, type ListResponse, type LiveMoney, type Restricted } from '../live';
 import type { TimeRow } from '../types';
-import { liveDrafts, liveReady } from './billing';
+import { liveDrafts, liveReady, mapException, mapReadyItem, type LiveReadyResponse } from './billing';
 import { mapProject, type ApiProject, type LiveProjectView } from './projects';
 
 type Ref = { id: string; ref_code: string; name: string };
@@ -72,3 +72,41 @@ export async function getProjectTimeLive(code: string): Promise<LiveProjectTimeR
 export const getProjectReadyLive = (code: string) => liveReady(code);
 /** GET /billing/drafts?project=: this project's drafts that were not rejected. */
 export const getProjectDraftsLive = (code: string) => liveDrafts(code);
+
+/** GET /billing/ready?project= plus the project's id, so the tab can check the viewer's scope for money. */
+export async function getProjectBillingReadyLive(code: string) {
+  const r = await apiFetch<LiveReadyResponse>(`/billing/ready?project=${encodeURIComponent(code)}`);
+  return {
+    items: r.data.map(mapReadyItem), exceptions: r.exceptions.map(mapException),
+    projectId: r.data[0]?.project.id ?? r.exceptions[0]?.project.id ?? null,
+  };
+}
+
+// ---------- Team (Staffing tab) ----------
+
+export type ProjectMember = { person: { id: string; ref_code: string; name: string; job_title: string | null }; role: string; is_pm: boolean };
+const membersPath = (code: string) => `/projects/${encodeURIComponent(code)}/members`;
+export const listProjectMembers = async (code: string): Promise<ProjectMember[]> => (await apiFetch<ListResponse<ProjectMember>>(membersPath(code))).data;
+export const addProjectMember = (code: string, personId: string, role: string) =>
+  apiFetch<{ members: ProjectMember[]; audit_event_id: string }>(membersPath(code), { method: 'POST', body: { person_id: personId, role } });
+export const removeProjectMember = (code: string, personId: string) =>
+  apiFetch<{ members: ProjectMember[]; audit_event_id: string }>(`${membersPath(code)}/${encodeURIComponent(personId)}`, { method: 'DELETE' });
+
+// ---------- Fee authorization (Billing tab) ----------
+
+export type FeePlanPhase = {
+  phase_id: string; code: string; name: string; component: string | null; billing_method: string | null; fee: LiveMoney | Restricted; fixed: boolean;
+  authorized_percent: number; authorizations: { id: string; cumulative_percent: number; note: string | null; authorized_at: string; authorized_by: string | null }[];
+};
+export type FeePlanMilestone = { id: string; label: string; amount: LiveMoney | Restricted; status: string; phase_id: string | null; phase: string | null; billing_method: string };
+export type FeePlan = {
+  project: { id: string; code: string; name: string }; can_authorize: boolean;
+  components: { id: string; name: string; billing_method: string }[]; phases: FeePlanPhase[]; milestones: FeePlanMilestone[];
+};
+const feePath = (code: string) => `/projects/${encodeURIComponent(code)}/fee-authorizations`;
+export const getFeePlan = (code: string) => apiFetch<FeePlan>(feePath(code));
+export const authorizeFee = (code: string, body: { phase_id: string; cumulative_percent: number; note?: string }) =>
+  apiFetch<{ id: string; cumulative_percent: number; previous_percent: number; audit_event_id: string }>(feePath(code), { method: 'POST', body });
+export const createMilestone = (code: string, body: { label: string; amount: number; phase_id?: string }) =>
+  apiFetch<{ id: string; status: string }>(`/projects/${encodeURIComponent(code)}/milestones`, { method: 'POST', body });
+export const authorizeMilestone = (id: string) => apiFetch<{ id: string; status: string }>(`/milestones/${encodeURIComponent(id)}/authorize`, { method: 'POST' });

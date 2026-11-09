@@ -23,8 +23,29 @@ async function anyPrincipal(tx: Tx, except?: string) {
   return (r?.person_id ?? except) as string;
 }
 
-/** Section 5.3 rule 6: substitute in date range, then the firm's fallback, then any principal. */
+/** The firm's fallback approver, else any other principal. Never the submitter while someone else exists. */
+async function firmFallback(tx: Tx, submitter: string) {
+  const firm = (await tx.query('select fallback_approver_id from firm')).rows[0];
+  if (firm?.fallback_approver_id && firm.fallback_approver_id !== submitter) {
+    const f = (await tx.query('select login_state, employment_state from person where id = $1', [firm.fallback_approver_id])).rows[0];
+    if (f && f.login_state === 'Enabled' && f.employment_state === 'Active') return firm.fallback_approver_id as string;
+  }
+  return anyPrincipal(tx, submitter);
+}
+
+/**
+ * Who approves project time. Staff time goes to the PM. A PM's own time goes to the project principal, then the
+ * firm's fallback approver, then any other principal: never back to the submitter (that would be SELF_APPROVAL).
+ */
+export async function projectTimeApprover(tx: Tx, project: { pm_id: string; principal_id: string | null }, submitter: string) {
+  if (project.pm_id !== submitter) return routeApprover(tx, project.pm_id, submitter);
+  if (project.principal_id && project.principal_id !== submitter) return routeApprover(tx, project.principal_id, submitter);
+  return firmFallback(tx, submitter);
+}
+
+/** Section 5.3 rule 6: substitute in date range, then the firm's fallback, then any principal. The submitter never approves their own work. */
 export async function routeApprover(tx: Tx, designated: string, submitter: string) {
+  if (designated === submitter) return firmFallback(tx, submitter);
   const p = (await tx.query('select login_state, employment_state from person where id = $1', [designated])).rows[0];
   const sub = (await tx.query(
     `select s.substitute_id from substitute s join person q on q.id = s.substitute_id
@@ -32,9 +53,7 @@ export async function routeApprover(tx: Tx, designated: string, submitter: strin
   )).rows[0];
   if (sub) return sub.substitute_id as string;
   if (p && p.login_state === 'Enabled' && p.employment_state === 'Active') return designated;
-  const firm = (await tx.query('select fallback_approver_id from firm')).rows[0];
-  if (firm?.fallback_approver_id && firm.fallback_approver_id !== submitter) return firm.fallback_approver_id as string;
-  return anyPrincipal(tx, submitter);
+  return firmFallback(tx, submitter);
 }
 
 async function loadRequest(tx: Tx, id: string) {

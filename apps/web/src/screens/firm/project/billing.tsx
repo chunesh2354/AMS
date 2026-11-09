@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getDrafts, getFeeComponents, getNteExceptions, getPeople, getReadyToBill, hasFinanceAccess, personName, type BillingDraft, type ReadyItem } from '../../../api';
 import { useResource } from '../../../api/useResource';
 import { isLive } from '../../../api/live';
-import { getProjectDraftsLive, getProjectReadyLive, isForbidden } from '../../../api/live/project-tabs';
-import { can, useSession } from '../../../app/session';
+import { getProjectBillingReadyLive, getProjectDraftsLive, getProjectReadyLive, getProjectTab, isForbidden } from '../../../api/live/project-tabs';
+import { can, useSession, type Viewer } from '../../../app/session';
 import { Button } from '../../../ui/Button';
 import { DataTable, RESTRICTED, type Column } from '../../../ui/DataTable';
 import { EntitlementBar } from '../../../ui/EntitlementBar';
@@ -15,8 +15,18 @@ import { StatusChip } from '../../../ui/StatusChip';
 import { formatINR } from '../../../ui/format';
 import { GenerateDraftSheet, LiveGenerateDraftSheet } from '../generate-draft-sheet';
 import { GoTo } from '../../shared/go-to';
+import { FeeAuthorizationPanel } from './billing-authorize';
 
 const noPeople = async (): Promise<Awaited<ReturnType<typeof getPeople>>> => [];
+
+/**
+ * Whether the viewer may see this project's billing money, by the server's own rule for /billing/ready and
+ * /billing/drafts: billing.prepare firm-wide, or scoped to a project they lead. Mock mode uses finance access.
+ */
+export function maySeeBillingMoney(viewer: Viewer, projectId: string | null) {
+  if (can(viewer, 'billing.prepare', { firmWide: true })) return true;
+  return viewer.capabilities?.['billing.prepare'] === 'scoped' && !!projectId && !!viewer.ledProjects?.includes(projectId);
+}
 
 export function ProjectBillingScreen() {
   const { id = '' } = useParams();
@@ -28,19 +38,28 @@ export function ProjectBillingScreen() {
   const guard = <T,>(p: Promise<T>) => p.catch((e: unknown) => { if (isForbidden(e)) setDenied(true); throw e; });
   // Fee components have no endpoint yet, so live mode leaves that section out.
   const components = useResource(() => (isLive ? Promise.resolve([]) : getFeeComponents(id)), [id]);
-  const ready = useResource<ReadyItem[]>(() => (isLive ? guard(getProjectReadyLive(id)).then((r) => r.items) : getReadyToBill(id)), [id, reload]);
+  // Live: the project's id, from the project itself or from the ready response, decides scoped access to money.
+  const [projectId, setProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isLive) return;
+    let live = true;
+    getProjectTab(id).then((p) => { if (live && p) setProjectId(p.live.id); }, () => {});
+    return () => { live = false; };
+  }, [id]);
+  const ready = useResource<ReadyItem[]>(() => (isLive ? guard(getProjectBillingReadyLive(id)).then((r) => { if (r.projectId) setProjectId((x) => x ?? r.projectId); return r.items; }) : getReadyToBill(id)), [id, reload]);
   const drafts = useResource<BillingDraft[]>(() => (isLive ? guard(getProjectDraftsLive(id)) : getDrafts(id)), [id, reload]);
   const nte = useResource(() => (isLive ? guard(getProjectReadyLive(id)).then((r) => r.exceptions) : getNteExceptions(id)), [id, reload]);
   const people = useResource(isLive ? noPeople : getPeople, []);
   const [generating, setGenerating] = useState(false);
-  // Live money is already fenced by the server: a value it will not show arrives as RESTRICTED.
-  const money = <T,>(pick: (r: T) => number) => (r: T) => (isLive ? pick(r) : finance ? pick(r) : RESTRICTED);
+  // The server does not redact ready-to-bill or draft money; it refuses (403) anyone without billing.prepare for the
+  // project. So the tab fences it itself, by the same rule: in live mode billing.prepare firm-wide or on a project the
+  // viewer leads, in mock mode finance access (as /firm/billing does). Anything else shows as restricted, never as a number.
+  const showMoney = isLive ? maySeeBillingMoney(viewer, projectId) : finance;
+  const money = <T,>(pick: (r: T) => number) => (r: T) => (showMoney ? pick(r) : RESTRICTED);
   const allShown = (l: ReadyItem[]) => l.every((x) => typeof x.amount === 'number' && Number.isFinite(x.amount));
-  const readyTotal = isLive
-    ? (allShown(ready.data ?? []) ? (l: ReadyItem[]) => l.reduce((s, x) => s + x.amount, 0) : undefined)
-    : finance ? (l: ReadyItem[]) => l.reduce((s, x) => s + x.amount, 0) : undefined;
+  const readyTotal = showMoney && allShown(ready.data ?? []) ? (l: ReadyItem[]) => l.reduce((s, x) => s + x.amount, 0) : undefined;
   const st = <T,>(r: { state: ListStateName; data: T[] | null }) => (denied ? 'denied' : r.state === 'ready' && !r.data?.length ? 'empty' : r.state);
-  const inr = (v: number) => (typeof v === 'number' && Number.isFinite(v) ? formatINR(v) : <RestrictedCell />);
+  const inr = (v: number) => (showMoney && typeof v === 'number' && Number.isFinite(v) ? formatINR(v) : <RestrictedCell />);
   const readyColumns: Column<ReadyItem>[] = [
     { key: 'component', header: 'Fee component', value: (r) => r.component },
     { key: 'basis', header: 'Basis', value: (r) => r.basis },
@@ -73,6 +92,7 @@ export function ProjectBillingScreen() {
               ))}
             </div>
           )}
+      {isLive && <FeeAuthorizationPanel code={id} showMoney={showMoney} mayPrepare={showMoney} onChanged={() => setReload((r) => r + 1)} />}
       <div className="two-pane">
         <div className="stack-4">
           <div className="toolbar toolbar--between"><h3 className="t-h3">Ready to bill</h3>{generate}</div>

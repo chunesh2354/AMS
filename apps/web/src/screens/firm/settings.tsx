@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { getImportPreview, getIntegrations, getSettingsLists, type ImportRow } from '../../api';
 import { useResource } from '../../api/useResource';
-import { canUseSettings, useSession } from '../../app/session';
+import { isLive } from '../../api/live';
+import { canSeeRates, canUseSettings, useSession, type Viewer } from '../../app/session';
 import { FIRM_NAME, PEOPLE } from '../../mock/studio-meridian';
 import { SettingsLayout } from '../../layouts/SettingsLayout';
 import { WizardLayout } from '../../layouts/WizardLayout';
@@ -29,9 +30,20 @@ const SECTIONS = [
   { key: 'templates', label: 'Templates' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
 ];
 
+/**
+ * The settings sections this viewer may open. Rates goes to exactly those the server lets read the rate card
+ * (rates.bill.manage or rates.cost.view): finance gets Rates alone, operations gets everything but Rates.
+ */
+export function settingsSectionsFor(viewer: Viewer) {
+  const full = canUseSettings(viewer);
+  const rates = canSeeRates(viewer);
+  return SECTIONS.filter((s) => (s.key === 'rates' ? rates : full));
+}
+
 function Profile() {
   const toast = useToast();
-  const [name, setName] = useState(FIRM_NAME);
+  const { viewer } = useSession();
+  const [name, setName] = useState(() => (isLive ? viewer.firm?.name ?? '' : FIRM_NAME));
   const [office, setOffice] = useState('Bengaluru');
   const [prefix, setPrefix] = useState('INV-DEMO-');
   const [terms, setTerms] = useState('30');
@@ -176,13 +188,14 @@ function Imports() {
 export function SettingsScreen() {
   const { viewer } = useSession();
   const section = useParams()['*'] ?? 'profile';
-  if (!canUseSettings(viewer)) return (<><PageHeader title="Settings" /><div className="solid-panel"><PermissionDenied capability="change firm settings" /></div></>);
-  const known = SECTIONS.find((s) => s.key === section);
-  if (!known) return <Navigate to="/firm/settings/profile" replace />;
+  const sections = settingsSectionsFor(viewer);
+  if (!sections.length) return (<><PageHeader title="Settings" /><div className="solid-panel"><PermissionDenied capability="change firm settings" /></div></>);
+  const known = sections.find((s) => s.key === section);
+  if (!known) return <Navigate to={`/firm/settings/${sections[0].key}`} replace />;
   return (
     <>
       <PageHeader title="Settings" />
-      <SettingsLayout label="Settings" items={SECTIONS.map((s) => ({ label: s.label, to: `/firm/settings/${s.key}` }))}>
+      <SettingsLayout label="Settings" items={sections.map((s) => ({ label: s.label, to: `/firm/settings/${s.key}` }))}>
         {section === 'profile' && <Profile />}
         {section === 'integrations' && <Integrations />}
         {section === 'imports' && <Imports />}
