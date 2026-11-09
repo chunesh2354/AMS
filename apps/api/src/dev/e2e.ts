@@ -12,7 +12,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-e2e-'));
 const db = await startDevDb(dir, PORT);
 // The demo platform admin (admin@platform.demo), as start.ts and the API tests create it.
 await seedPlatformAdmin(ownerUrl(PORT));
-const app = buildApp(appUrl(PORT));
+// The browser suite signs in many times from one address within a minute; the sign-in rate limit is
+// covered by test/rate-limit.test.ts, so it is off here (as it is in the API tests).
+const app = buildApp(appUrl(PORT), { rateLimit: false });
 await app.listen({ host: '127.0.0.1', port: API_PORT });
 console.log(`E2E API on http://127.0.0.1:${API_PORT}/api/v1`);
 

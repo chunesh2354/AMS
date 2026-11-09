@@ -19,6 +19,7 @@ export const CONNECTED_ROUTES = [
   '/firm/receivables',
   '/me/time',
   '/firm/settings/accounts',
+  '/firm/settings/rates',
 ] as const;
 
 export const SAMPLE_DATA_NOTICE = 'Sample data. This screen is not connected to the database yet.';

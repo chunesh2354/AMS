@@ -35,6 +35,7 @@ import { MyWorkScreen } from './screens/me/work';
 import { ProjectsScreen } from './screens/firm/projects';
 import { LoginScreen, StudioLoginScreen, TeamLoginScreen } from './screens/auth/login';
 import { AcceptInviteScreen } from './screens/auth/accept-invite';
+import { ResetPasswordScreen } from './screens/auth/reset-password';
 import { PlatformLoginScreen } from './screens/platform/login';
 import { PlatformCompaniesScreen } from './screens/platform/companies';
 
@@ -56,6 +57,7 @@ export const routes: RouteObject[] = [
   { path: '/login/studio', element: <StudioLoginScreen /> },
   { path: '/login/team', element: <TeamLoginScreen /> },
   { path: '/accept-invite/:token', element: <AcceptInviteScreen /> },
+  { path: '/reset-password/:token', element: <ResetPasswordScreen /> },
   { path: '/platform/login', element: <PlatformLoginScreen /> },
   { path: '/platform', element: <PlatformCompaniesScreen /> },
   {

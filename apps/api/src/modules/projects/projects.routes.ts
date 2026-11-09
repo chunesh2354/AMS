@@ -8,6 +8,7 @@ import { required, uuidParam } from '../../http/validation';
 import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
+import { setupRoutes } from './setup.routes';
 
 export const ACTUAL_SQL = `(approval_state = 'Approved' or (approval_state = 'Amended' and billing_state = 'Billed'))`;
 
@@ -94,14 +95,19 @@ export async function projectView(tx: Tx, p: any, actor: Actor) {
   };
 }
 
-export function projectRoutes({ get, post, put }: Api) {
+export function projectRoutes(api: Api) {
+  const { get, post, put } = api;
+  setupRoutes(api);
   get('/projects', async ({ tx, actor, req }) => {
     const v = visibleProjects(actor);
     const rows = (await tx.query(
       `select p.*, c.name as client_name, pm.ref_code as pm_ref, pm.name as pm_name from project p join client c on c.id = p.client_id join person pm on pm.id = p.pm_id
        where ($1::uuid[] is null or p.id = any($1)) order by p.code`, [v === 'all' ? null : v],
     )).rows;
-    return list(req, await Promise.all(rows.map((p) => projectView(tx, p, actor))));
+    // One transaction client: run the queries one after another (pg does not queue overlapping calls safely).
+    const out: Awaited<ReturnType<typeof projectView>>[] = [];
+    for (const p of rows) out.push(await projectView(tx, p, actor));
+    return list(req, out);
   });
 
   get('/projects/:code', async ({ tx, actor, params }) => {

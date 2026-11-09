@@ -22,9 +22,10 @@ import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { GoTo } from '../shared/go-to';
 import { AccountsSettings } from './accounts';
+import { RatesSettings } from './rates';
 
 const SECTIONS = [
-  { key: 'profile', label: 'Profile' }, { key: 'permissions', label: 'Permissions' }, { key: 'accounts', label: 'Accounts' }, { key: 'calendars', label: 'Calendars' }, { key: 'work-categories', label: 'Work categories' },
+  { key: 'profile', label: 'Profile' }, { key: 'permissions', label: 'Permissions' }, { key: 'accounts', label: 'Accounts' }, { key: 'rates', label: 'Rates' }, { key: 'calendars', label: 'Calendars' }, { key: 'work-categories', label: 'Work categories' },
   { key: 'templates', label: 'Templates' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
 ];
 
@@ -186,7 +187,8 @@ export function SettingsScreen() {
         {section === 'integrations' && <Integrations />}
         {section === 'imports' && <Imports />}
         {section === 'accounts' && <AccountsSettings />}
-        {!['profile', 'integrations', 'imports', 'accounts'].includes(section) && <ListSection section={section} title={known.label} />}
+        {section === 'rates' && <RatesSettings />}
+        {!['profile', 'integrations', 'imports', 'accounts', 'rates'].includes(section) && <ListSection section={section} title={known.label} />}
       </SettingsLayout>
     </>
   );

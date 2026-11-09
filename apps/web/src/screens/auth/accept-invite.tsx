@@ -12,8 +12,8 @@ const HOME = '/me/home';
 
 type Load = { state: 'loading' } | { state: 'ready'; invite: InviteDetails } | { state: 'expired' } | { state: 'invalid' } | { state: 'error'; message: string };
 
-/** The invite page's frame: the Practice header, the form side and the studio clock. */
-function Frame({ children }: { children: ReactNode }) {
+/** The invite page's frame: the Practice header, the form side and the studio clock. Shared with the reset page. */
+export function Frame({ children }: { children: ReactNode }) {
   return <AuthPage><AuthSplit wide>{children}</AuthSplit></AuthPage>;
 }
 
@@ -21,7 +21,7 @@ const TICK = 'M5 12.5l4.5 4.5L19 7.5';
 const DOT = 'M12 12h.01';
 
 /** One live rule under the password: a dot until it is met, then a tick. Missed rules turn redline after a submit. */
-function Rule({ met, missed, children }: { met: boolean; missed: boolean; children: string }) {
+export function Rule({ met, missed, children }: { met: boolean; missed: boolean; children: string }) {
   return (
     <li className={`auth-rules__item${met ? ' is-met' : missed ? ' is-missed' : ''}`}>
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={met ? TICK : DOT} /></svg>
@@ -31,7 +31,7 @@ function Rule({ met, missed, children }: { met: boolean; missed: boolean; childr
   );
 }
 
-const expiryDate = (iso: string) => {
+export const expiryDate = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
 };

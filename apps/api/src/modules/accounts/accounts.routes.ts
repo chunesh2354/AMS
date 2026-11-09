@@ -22,10 +22,20 @@ const SET_TO_TYPE = Object.fromEntries(Object.entries(TYPE_TO_SET).map(([t, s]) 
 
 const INVITE_HOURS = 72;
 const SESSION_DAYS = 14;
-const MIN_PASSWORD = 12;
+/** Shared with accept-invite, reset and change-password so every path asks for the same length. */
+export const MIN_PASSWORD = 12;
+const RESET_HOURS = 24;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const inviteUrl = (token: string) => `/accept-invite/${token}`;
+const resetUrl = (token: string) => `/reset-password/${token}`;
+
+/** 400 unless the password is a string of MIN_PASSWORD to 1024 characters. */
+export function assertPassword(v: unknown, field = 'password'): asserts v is string {
+  if (typeof v !== 'string' || v.length < MIN_PASSWORD || v.length > 1024) {
+    throw new ApiError(400, 'VALIDATION', `Use a password of at least ${MIN_PASSWORD} characters.`, [{ field, code: 'min_length', min: MIN_PASSWORD }]);
+  }
+}
 const sortTypes = (types: Iterable<AccountType>) => ACCOUNT_TYPES.filter((t) => new Set(types).has(t));
 
 function parseTypes(v: unknown): AccountType[] {
@@ -60,6 +70,10 @@ async function issueInvite(tx: Tx, firmId: string, personId: string, actorId: st
   )).rows[0];
   await tx.query(`update person set invitation_state = 'Sent', updated_at = now(), updated_by = $2 where id = $1`, [personId, actorId]);
   return { invite_url: inviteUrl(token), invite_expires_at: row.expires_at as Date, email_sent: false as const };
+}
+
+async function revokeResetLinks(tx: Tx, personId: string, actorId: string) {
+  await tx.query('update password_reset_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actorId]);
 }
 
 export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
@@ -174,6 +188,7 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     // An unused invite link may be held by a non-principal; once the account becomes sensitive, that link must stop working.
     if (added.some((t) => SENSITIVE_TYPES.includes(t))) {
       await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actor.id]);
+      await revokeResetLinks(tx, personId, actor.id);
     }
     const audit_event_id = await audit(tx, actor, firmId, {
       recordType: 'person', recordId: personId, action: 'set_account_types', previous: { account_types: before }, next: { account_types: types, added, removed },
@@ -215,6 +230,7 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     await tx.query(`update person set login_state = 'Revoked', employment_state = 'Ended', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     await tx.query('update session set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and revoked_at is null', [personId, actor.id]);
     await tx.query('update invitation_token set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and used_at is null and revoked_at is null', [personId, actor.id]);
+    await revokeResetLinks(tx, personId, actor.id);
     const audit_event_id = await audit(tx, actor, firmId, {
       recordType: 'person', recordId: personId, action: 'deactivate', reason,
       previous: { login_state: p.login_state, employment_state: p.employment_state }, next: { login_state: 'Revoked', employment_state: 'Ended' },
@@ -240,6 +256,57 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     return { ok: true, login_state: 'Enabled', employment_state: 'Active', audit_event_id };
   });
 
+  // ----- Password reset link. Whoever holds it can set the password, so the same sensitive rule as deactivate applies. -----
+  post('/accounts/:id/reset-link', async ({ tx, actor, firmId, params }) => {
+    authorize(actor, 'people.manage');
+    const personId = uuidParam(params.id, 'Account');
+    const p = (await tx.query('select id, invitation_state, login_state from person where id = $1', [personId])).rows[0];
+    if (!p) throw notFound('Account');
+    const types = await currentTypes(tx, personId);
+    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can reset the password of a principal or finance account.', { action: 'reset_link' });
+    }
+    if (p.invitation_state !== 'Accepted') throw ruleError('accounts.reset', 'This person has not accepted their invitation yet. Send a new invitation instead.');
+    if (p.login_state !== 'Enabled') throw ruleError('accounts.reset', 'Reactivate this account before issuing a password reset link.');
+    await revokeResetLinks(tx, personId, actor.id);
+    const token = newToken();
+    const row = (await tx.query(
+      `insert into password_reset_token (firm_id, person_id, token_hash, expires_at, created_by, updated_by) values ($1,$2,$3, now() + interval '${RESET_HOURS} hours', $4, $4) returning expires_at`,
+      [firmId, personId, hashToken(token), actor.id],
+    )).rows[0];
+    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'person', recordId: personId, action: 'issue_reset_link', next: { expires_at: row.expires_at } });
+    return { reset_url: resetUrl(token), expires_at: row.expires_at as Date, email_sent: false as const, audit_event_id };
+  });
+
+  // ----- Public reset flow (app.ts lets /api/v1/auth/reset/ through without a session: the token is the credential). -----
+
+  const resetGone = () => new ApiError(410, 'RESET_EXPIRED', 'This reset link has expired or was already used. Ask your studio admin for a new one.');
+  const findReset = async (token: unknown) => {
+    if (typeof token !== 'string' || !token || token.length > 200) throw notFound('Reset link');
+    const r = (await pool.query('select * from auth_find_reset($1)', [hashToken(token)])).rows[0];
+    if (!r) throw notFound('Reset link');
+    if (r.used_at || r.revoked_at || new Date(r.expires_at) <= new Date()) throw resetGone();
+    return r;
+  };
+
+  app.get('/api/v1/auth/reset/:token', async (req) => {
+    const r = await findReset((req.params as { token?: string }).token);
+    return { name: r.name, firm_name: r.firm_name, expires_at: r.expires_at };
+  });
+
+  // Does not sign in: the person signs in with the new password, and every session they had is revoked.
+  app.post('/api/v1/auth/reset/:token', async (req) => {
+    const token = (req.params as { token?: string }).token;
+    const body = (req.body ?? {}) as { password?: unknown };
+    required(body as Record<string, unknown>, ['password']);
+    assertPassword(body.password);
+    await findReset(token);
+    const passwordHash = await hash(body.password);
+    const done = (await pool.query('select * from auth_reset_password($1, $2)', [hashToken(token as string), passwordHash])).rows[0];
+    if (!done) throw resetGone();
+    return { ok: true };
+  });
+
   // ----- Public invite flow. Both paths must be in server.ts PUBLIC (the token is the credential). -----
 
   const findInvite = async (token: unknown) => {
@@ -260,9 +327,7 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
   app.post('/api/v1/auth/accept-invite', async (req, reply) => {
     const body = (req.body ?? {}) as { token?: unknown; password?: unknown };
     required(body as Record<string, unknown>, ['token', 'password']);
-    if (typeof body.password !== 'string' || body.password.length < MIN_PASSWORD || body.password.length > 1024) {
-      throw new ApiError(400, 'VALIDATION', `Use a password of at least ${MIN_PASSWORD} characters.`, [{ field: 'password', code: 'min_length', min: MIN_PASSWORD }]);
-    }
+    assertPassword(body.password);
     await findInvite(body.token);
     const passwordHash = await hash(body.password);
     const done = (await pool.query('select * from auth_accept_invite($1, $2)', [hashToken(body.token as string), passwordHash])).rows[0];

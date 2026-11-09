@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getProject, getProjectAttention, personName, type Phase } from '../../../api';
+import { isLive } from '../../../api/live';
+import { getProjectTab, isForbidden, nameOf, type ProjectTabView } from '../../../api/live/project-tabs';
 import { useResource } from '../../../api/useResource';
 import { useSession } from '../../../app/session';
 import { WorkspaceColumns } from '../../../layouts/WorkspaceColumns';
@@ -16,6 +19,10 @@ import { TODAY } from '../../../mock/studio-meridian';
 import { GoTo } from '../../shared/go-to';
 
 export function ProjectOverviewScreen() {
+  return isLive ? <LiveProjectOverview /> : <MockProjectOverview />;
+}
+
+function MockProjectOverview() {
   const { id = '' } = useParams();
   const { viewer } = useSession();
   const { state, data: p, retry } = useResource(() => getProject(id, viewer), [id, viewer.id]);
@@ -69,6 +76,73 @@ export function ProjectOverviewScreen() {
         main={<DataTable label="Phases" columns={columns} rows={p.phases} rowKey={(x) => x.id} density="dense" columnPicker />}
         side={<AttentionList items={attention.data ?? []} state={attention.state} onRetry={attention.retry} emptyMessage="Nothing needs attention on this project." capability="view this project" />}
       />
+    </>
+  );
+}
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Live mode: GET /projects/:code. Tasks, conflicts and the attention list have no endpoint yet,
+ * so those tiles and that column are left out rather than filled with sample numbers.
+ */
+function LiveProjectOverview() {
+  const { id = '' } = useParams();
+  const [denied, setDenied] = useState(false);
+  const { state, data: p, retry } = useResource<ProjectTabView | null>(
+    () => getProjectTab(id).catch((e: unknown) => { if (isForbidden(e)) setDenied(true); throw e; }),
+    [id],
+  );
+  const shown = denied ? 'denied' : state === 'ready' && !p ? 'empty' : state;
+  if (shown === 'error' || shown === 'denied' || shown === 'empty') {
+    return <ListStateBlock state={shown} label="This project" onRetry={retry} capability="view this project" empty={{ message: 'No project has that code.', action: <GoTo to="/firm/projects">See all projects</GoTo> }} />;
+  }
+  if (!p || shown === 'loading') {
+    return <div className="grid-12">{Array.from({ length: 3 }, (_, i) => <div key={i} className="span-4"><Skeleton kind="card" /></div>)}</div>;
+  }
+  const n = (v: number) => (Number.isFinite(v) ? v : 0);
+  const columns: Column<Phase>[] = [
+    { key: 'name', header: 'Phase', value: (x) => x.name },
+    { key: 'owner', header: 'Owner', type: 'person', value: (x) => nameOf(p.people, x.ownerId), hiddenByDefault: true },
+    { key: 'budget', header: 'Budget (h)', type: 'number', value: (x) => x.budget, total: (r) => r.reduce((s, x) => s + n(x.budget), 0) },
+    { key: 'actual', header: 'Actual (h)', type: 'number', value: (x) => x.actual, total: (r) => r.reduce((s, x) => s + n(x.actual), 0) },
+    { key: 'forecast', header: 'Forecast (h)', type: 'number', value: (x) => x.actual + x.etc, total: (r) => r.reduce((s, x) => s + n(x.actual) + n(x.etc), 0) },
+    {
+      key: 'variance', header: 'Over / under (h)', type: 'number', value: (x) => x.actual + x.etc - x.budget,
+      render: (x) => { const v = x.actual + x.etc - x.budget; return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{v > 0 ? `+${v}` : v < 0 ? `−${-v}` : v}</span>; },
+    },
+    { key: 'status', header: 'Status', type: 'status', value: (x) => x.status },
+  ];
+  const dated = p.phases.filter((x) => x.start && x.end);
+  const missing = p.live.contributionMissing;
+  return (
+    <>
+      <div className="grid-12">
+        <div className="span-4">
+          <KpiTile label="Hours" value={formatGrouped(p.hours.actual)} unit={`/ ${formatGrouped(p.hours.budget)} h`}>
+            <BudgetBar mini baseline={p.hours.budget} actual={p.hours.actual} forecast={p.hours.forecast} />
+          </KpiTile>
+        </div>
+        <div className="span-4"><KpiTile label="Delivery" value={formatPercent(p.delivery)} /></div>
+        <div className="span-4">
+          <KpiTile
+            label="Contribution"
+            restricted={p.contribution.restricted}
+            value={p.contribution.restricted ? undefined : formatINR(p.contribution.value)}
+            complete={missing.length === 0}
+            missing={missing}
+            delta={{ text: 'Management estimate' }}
+          />
+        </div>
+        <div className="span-12">
+          <section className="card glass" aria-labelledby="entitlement">
+            <h2 id="entitlement" className="t-label ink-2">Entitlement</h2>
+            {!p.entitlement.restricted && <EntitlementBar {...p.entitlement.value} />}
+          </section>
+        </div>
+      </div>
+      {dated.length > 0 && <GanttStrip today={todayIso()} phases={dated} />}
+      <DataTable label="Phases" columns={columns} rows={p.phases} rowKey={(x) => x.id} density="dense" columnPicker />
     </>
   );
 }

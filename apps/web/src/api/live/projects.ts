@@ -81,3 +81,14 @@ export async function getLiveProject(code: string): Promise<LiveProjectView | nu
   }
 }
 export const isLiveProject = (p: ProjectView | null | undefined): p is LiveProjectView => !!p && 'live' in p;
+
+// ---------- Create (POST /projects): one transaction makes the contract, fee component, phases and PM membership ----------
+
+export type BillingMethod = 'fixed_milestone' | 'fixed_percent' | 'hourly' | 'hourly_nte' | 'percent_construction' | 'consultant_recharge';
+export type NewProjectPhase = { code: string; name: string; start_date?: string; end_date?: string; fee?: number; budget_hours?: number };
+export type NewProject = {
+  code: string; name: string; client_id: string; pm_id: string; billing_method: BillingMethod;
+  contracted_amount?: number; fee_percent?: number; cap_amount?: number; contract_summary?: string;
+  phases: NewProjectPhase[];
+};
+export const createLiveProject = (body: NewProject) => apiFetch<{ id: string; code: string; audit_event_id: string }>('/projects', { method: 'POST', body });

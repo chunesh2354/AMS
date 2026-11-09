@@ -5,7 +5,7 @@ import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { LoginScreen, StudioLoginScreen, TeamLoginScreen, homeFor } from './login';
 import { BAD_CREDENTIALS } from './sign-in-form';
-import { FORGOT_PASSWORD_HREF } from './frame';
+import { FORGOT_PASSWORD_HELP, FORGOT_PASSWORD_HREF } from './frame';
 
 vi.mock('../../api/live', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../api/live')>()), isLive: true }));
 
@@ -67,12 +67,26 @@ describe('studio principal sign-in (/login/studio)', () => {
     open(<StudioLoginScreen />);
     expect(screen.getByRole('heading', { level: 1, name: 'Studio principal' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Keep me signed in' })).toBeChecked();
-    expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', FORGOT_PASSWORD_HREF);
+    // No reset email yet: "Forgot password?" says to ask the studio admin, with support as the last resort.
     expect(FORGOT_PASSWORD_HREF).toMatch(/^mailto:support@csdv\.in/);
     expect(screen.getByRole('link', { name: /Team member sign-in/ })).toHaveAttribute('href', '/login/team');
     expect(screen.getByRole('link', { name: /Platform admin sign-in/ })).toHaveAttribute('href', '/platform/login');
     expect(screen.getByRole('link', { name: /All sign-in options/ })).toHaveAttribute('href', '/login');
     expect(screen.getByRole('img', { name: /^Studio time \d\d:\d\d$/ })).toBeInTheDocument();
+  });
+
+  it('Forgot password? tells people to ask their studio admin for a reset link', async () => {
+    open(<StudioLoginScreen />);
+    const forgot = screen.getByRole('button', { name: 'Forgot password?' });
+    expect(forgot).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(FORGOT_PASSWORD_HELP, { exact: false })).not.toBeVisible();
+    await userEvent.click(forgot);
+    expect(forgot).toHaveAttribute('aria-expanded', 'true');
+    const help = document.getElementById(forgot.getAttribute('aria-controls')!)!;
+    expect(help).toBeVisible();
+    expect(help).toHaveTextContent(/Ask your studio admin or a principal for a password reset link/);
+    expect(within(help).getByRole('link', { name: 'support' })).toHaveAttribute('href', FORGOT_PASSWORD_HREF);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 
   it('shows the error alert when the email and password do not match', async () => {

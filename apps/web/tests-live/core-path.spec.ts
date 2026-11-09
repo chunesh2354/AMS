@@ -84,6 +84,13 @@ test('2a. PM sees approvals; PRJ-01 contribution restricted', async ({ page }) =
   await page.goto('/firm/approvals');
   await shot(page, 'approvals');
   await page.goto('/firm/projects/PRJ-01');
+  // Only the seeded database says this: its Tender and Site supervision phases are "Not started"
+  // (the sample studio calls them "Planned"), and it has no Open tasks tile (no tasks endpoint yet).
+  const phases = page.getByRole('region', { name: 'Phases' });
+  await expect(phases.getByRole('rowheader', { name: 'Tender' })).toBeVisible();
+  await expect(phases.getByText('Not started').first()).toBeVisible();
+  await expect(phases.getByText('Planned')).toHaveCount(0);
+  await expect(page.getByText('Open tasks')).toHaveCount(0);
   // RestrictedCell is a lock icon with an accessible name, not visible text.
   await expect(page.getByRole('img', { name: /^restricted, requires finance permission/ }).first()).toBeVisible();
   await shot(page, 'project-restricted');

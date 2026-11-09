@@ -10,7 +10,8 @@ set -euo pipefail
 : "${AMS_BACKUP_BUCKET:?set AMS_BACKUP_BUCKET}"
 : "${AWS_REGION:?set AWS_REGION}"
 AMS_REPO="${AMS_REPO:-https://github.com/chunesh2354/AMS.git}"
-AMS_BRANCH="${AMS_BRANCH:-main}"
+# core-path until its PR merges; switch this default back to main after the merge.
+AMS_BRANCH="${AMS_BRANCH:-core-path}"
 APP_DIR=/opt/ams
 ENV_FILE=/etc/ams/env
 export DEBIAN_FRONTEND=noninteractive
@@ -95,6 +96,7 @@ log "installing services"
 install -m 644 "$APP_DIR/infra/aws/ams-api.service" /etc/systemd/system/ams-api.service
 sed "s|{\$AMS_DOMAIN}|${AMS_DOMAIN}|g" "$APP_DIR/infra/aws/Caddyfile" > /etc/caddy/Caddyfile
 install -m 755 "$APP_DIR/infra/aws/backup.sh" /usr/local/bin/ams-backup
+install -m 755 "$APP_DIR/infra/aws/restore.sh" /usr/local/bin/ams-restore
 install -m 755 "$APP_DIR/infra/aws/deploy.sh" /usr/local/bin/ams-deploy
 install -m 755 "$APP_DIR/infra/aws/create-platform-admin.sh" /usr/local/bin/ams-create-platform-admin
 install -m 755 "$APP_DIR/infra/aws/set-platform-admin-password.sh" /usr/local/bin/ams-set-platform-admin-password

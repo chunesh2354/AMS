@@ -126,7 +126,10 @@ export function approvalRoutes({ get, post, pool }: Api) {
       `${LIST_SQL} where (a.approver_id = $1 or a.delegated_to_id = $1) and ($2::text is null or a.status = $2) and ($3::text is null or a.type = $3) order by a.created_at`,
       [actor.id, query.status ?? 'Pending', query.type ?? null],
     )).rows;
-    return list(req, await Promise.all(rows.map((r) => view(tx, r))));
+    // One transaction client: run the queries one after another (pg does not queue overlapping calls safely).
+    const out: Awaited<ReturnType<typeof view>>[] = [];
+    for (const r of rows) out.push(await view(tx, r));
+    return list(req, out);
   });
 
   get('/approvals/:id', async ({ tx, actor, params }) => {

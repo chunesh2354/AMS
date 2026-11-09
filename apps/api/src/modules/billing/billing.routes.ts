@@ -259,7 +259,10 @@ export function billingRoutes({ get, post, put }: Api) {
   get('/billing/drafts', async ({ tx, actor, query, req }) => {
     const projects = await scopeOf(tx, actor, query.project);
     const rows = (await tx.query(`${DRAFT_SQL} where d.project_id = any($1::uuid[]) and d.approval_state <> 'Rejected' order by d.draft_no`, [projects.map((p) => p.id)])).rows;
-    return list(req, await Promise.all(rows.map((d) => draftView(tx, d))));
+    // One transaction client: run the queries one after another (pg does not queue overlapping calls safely).
+    const out: Awaited<ReturnType<typeof draftView>>[] = [];
+    for (const d of rows) out.push(await draftView(tx, d));
+    return list(req, out);
   });
 
   get('/billing/drafts/:id', async ({ tx, actor, params }) => {

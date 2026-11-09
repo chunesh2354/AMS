@@ -101,7 +101,7 @@ const NO_VIEWER: Viewer = { id: '', name: '', title: '', roles: [] };
 const noop = () => {};
 
 /** Paths that render without a firm viewer: the sign-in pages (/login and below), the invite page and the platform console (its own session). */
-const NO_VIEWER_PATHS = ['/login', '/platform', '/accept-invite'];
+const NO_VIEWER_PATHS = ['/login', '/platform', '/accept-invite', '/reset-password'];
 const needsNoViewer = (path: string) => NO_VIEWER_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 
 /** Loads the signed-in person. Those pages render without one; a 401 anywhere else goes to /login inside apiFetch. */

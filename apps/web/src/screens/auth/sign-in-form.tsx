@@ -1,8 +1,8 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ApiFailure, failureMessage } from '../../api/live';
 import type { StudioClockProps } from '../../ui/StudioClock';
-import { AuthAlert, AuthHeading, AuthPage, AuthSplit, BackToOptions, DoorLinks, FORGOT_PASSWORD_HREF, SecretInput, type DoorLink } from './frame';
+import { AuthAlert, AuthHeading, AuthPage, AuthSplit, BackToOptions, DoorLinks, FORGOT_PASSWORD_HELP, FORGOT_PASSWORD_HREF, SecretInput, type DoorLink } from './frame';
 
 export const BAD_CREDENTIALS = "That email and password don't match. Check both and try again.";
 
@@ -35,6 +35,8 @@ export function SignInForm({ id, title, lead, formLabel, emailPlaceholder, empty
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const forgotId = useId();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -106,8 +108,20 @@ export function SignInForm({ id, title, lead, formLabel, emailPlaceholder, empty
                 Keep me signed in
               </label>
             ) : <span className="auth-note">{extra}</span>}
-            <a className="auth-link" href={FORGOT_PASSWORD_HREF}>Forgot password?</a>
+            <button
+              type="button"
+              className="auth-link"
+              style={{ background: 'none', border: 0, padding: 0, fontFamily: 'inherit', color: 'inherit', cursor: 'pointer' }}
+              aria-expanded={forgotOpen}
+              aria-controls={forgotId}
+              onClick={() => setForgotOpen((o) => !o)}
+            >
+              Forgot password?
+            </button>
           </div>
+          <p id={forgotId} className="auth-fineprint" hidden={!forgotOpen}>
+            {FORGOT_PASSWORD_HELP} If you are the only admin, write to <a href={FORGOT_PASSWORD_HREF}>support</a>.
+          </p>
           <button type="submit" className="auth-submit" disabled={busy} aria-busy={busy || undefined}>
             {busy && <Loader2 size={18} strokeWidth={1.5} className="auth-submit__spin" aria-hidden />}
             Sign in

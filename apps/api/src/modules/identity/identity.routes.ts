@@ -9,6 +9,7 @@ import { required, uuidParam } from '../../http/validation';
 import { withFirm } from '../../db/pool';
 import { SESSION_COOKIE } from '../../auth/sessions';
 import type { Api } from '../../http/api';
+import { assertPassword } from '../accounts/accounts.routes';
 
 const SESSION_DAYS = 14;
 const DUMMY_HASH = hash('not-a-real-password');
@@ -45,6 +46,23 @@ export function authRoutes(api: Api, opts: { secureCookie?: boolean }) {
     const firm = (await tx.query('select id, trading_name, legal_name, currency, timezone, accounting_adapter from firm')).rows[0];
     const me = (await tx.query('select id, ref_code, name, work_email, job_title, manager_id from person where id = $1', [actor.id])).rows[0];
     return { person: me, firm, permission_sets: actor.sets, capabilities: actor.caps, led_projects: actor.ledProjects, member_projects: actor.memberProjects };
+  });
+
+  // Signed-in password change. Every other session of this person is revoked; this one stays.
+  post('/me/password', async ({ tx, actor, firmId, body }) => {
+    required(body, ['current_password', 'new_password']);
+    if (typeof body.current_password !== 'string') throw new ApiError(400, 'VALIDATION', 'Enter your current password.', [{ field: 'current_password', code: 'required' }]);
+    assertPassword(body.new_password, 'new_password');
+    const row = (await tx.query('select password_hash from person where id = $1', [actor.id])).rows[0];
+    const ok = row?.password_hash ? await verify(row.password_hash, body.current_password).catch(() => false) : false;
+    if (!ok) throw new ApiError(400, 'WRONG_PASSWORD', 'Your current password is not correct.', [{ field: 'current_password', code: 'mismatch' }]);
+    if (body.new_password === body.current_password) throw new ApiError(400, 'VALIDATION', 'Choose a password different from your current one.', [{ field: 'new_password', code: 'unchanged' }]);
+    await tx.query('update person set password_hash = $2, updated_at = now(), updated_by = $1 where id = $1', [actor.id, await hash(body.new_password)]);
+    const revoked = await tx.query('update session set revoked_at = now(), updated_at = now(), updated_by = $1 where person_id = $1 and id <> $2 and revoked_at is null', [actor.id, actor.sessionId]);
+    // An unused reset link would otherwise still override the password the person just chose.
+    await tx.query('update password_reset_token set revoked_at = now(), updated_at = now(), updated_by = $1 where person_id = $1 and used_at is null and revoked_at is null', [actor.id]);
+    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'person', recordId: actor.id, action: 'change_password', next: { sessions_revoked: revoked.rowCount ?? 0 } });
+    return { ok: true, sessions_revoked: revoked.rowCount ?? 0, audit_event_id };
   });
 
   get('/people', async ({ tx, actor, req }) => {

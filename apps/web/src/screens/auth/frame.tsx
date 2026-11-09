@@ -4,8 +4,10 @@ import { StudioClock, type StudioClockProps } from '../../ui/StudioClock';
 import '../../ui/styles/auth.css';
 
 export const SUPPORT_EMAIL = 'support@csdv.in';
-/** There is no self-service reset yet, so "Forgot password?" writes to support. */
+/** Support's address for a password reset, for a studio with no other admin to ask. */
 export const FORGOT_PASSWORD_HREF = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Password reset')}`;
+/** Email is not connected, so there is no self-service reset: "Forgot password?" says who issues a reset link. */
+export const FORGOT_PASSWORD_HELP = 'Ask your studio admin or a principal for a password reset link. Reset emails are not connected yet.';
 
 export const LOGIN_PATHS = { chooser: '/login', studio: '/login/studio', team: '/login/team', platform: '/platform/login' } as const;
 

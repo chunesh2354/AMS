@@ -4,6 +4,7 @@ import {
   ACCOUNT_TYPES, absoluteInviteUrl, accountTypeLabel, createAccount, deactivateAccount, listAccounts, reactivateAccount, resendInvite,
   rolesToAccountTypes, setAccountTypes, type Account, type AccountType, type Invite,
 } from '../../api/live/accounts';
+import { absoluteResetUrl, issueResetLink, type ResetLink } from '../../api/live/password';
 import { PEOPLE } from '../../mock/studio-meridian';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox';
@@ -21,6 +22,7 @@ import { useToast } from '../../ui/Toast';
 import { COPY_BLOCKED, useCopy } from '../../ui/copy';
 
 export const EMAIL_NOTE = 'Email delivery is not connected yet. Send this link yourself.';
+export const RESET_NOTE = 'Email is not connected yet. Send this link to them yourself, over a channel you trust.';
 const MOCK_NOTE = 'Nothing is saved in this demo.';
 const CAPABILITY = 'manage accounts';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -69,6 +71,25 @@ export function InviteLink({ invite }: { invite: Invite }) {
       <span><Button onClick={() => void onCopy()}>{state === 'copied' ? 'Copied' : 'Copy link'}</Button></span>
       {state === 'blocked' && <InlineAlert variant="warn" title={COPY_BLOCKED} />}
       <InlineAlert variant="warn" title={EMAIL_NOTE} />
+    </div>
+  );
+}
+
+/** The reset link, a copy button and the note that email is not connected. */
+export function ResetLinkView({ link }: { link: ResetLink }) {
+  const toast = useToast();
+  const id = useId();
+  const url = absoluteResetUrl(link.reset_url);
+  const { state, copy } = useCopy();
+  const onCopy = async () => {
+    if (await copy(url, id)) toast({ variant: 'success', message: 'Reset link copied.' });
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+      <TextField id={id} label="Reset link" value={url} readOnly mono onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} helper={`Works once, until ${new Date(link.expires_at).toLocaleString()}.`} />
+      <span><Button onClick={() => void onCopy()}>{state === 'copied' ? 'Copied' : 'Copy link'}</Button></span>
+      {state === 'blocked' && <InlineAlert variant="warn" title={COPY_BLOCKED} />}
+      <InlineAlert variant="warn" title={RESET_NOTE} />
     </div>
   );
 }
@@ -184,9 +205,10 @@ function TypesSheet({ account, onClose, onSaved }: { account: Account | null; on
   );
 }
 
-type Pending = { kind: 'invite' | 'deactivate' | 'reactivate'; account: Account };
+type Pending = { kind: 'invite' | 'reset' | 'deactivate' | 'reactivate'; account: Account };
 const CONFIRM: Record<Pending['kind'], { title: string; button: string; body: (a: Account) => string }> = {
   invite: { title: 'Resend invite', button: 'Create new link', body: (a) => `A new invite link is made for ${a.name}. Any earlier link stops working.` },
+  reset: { title: 'Reset password link', button: 'Create reset link', body: (a) => `${a.name} can set a new password from this link for 24 hours. Any earlier reset link stops working, and setting a password signs them out everywhere.` },
   deactivate: { title: 'Deactivate account', button: 'Deactivate', body: (a) => `${a.name} is signed out everywhere and can no longer sign in. Their records stay.` },
   reactivate: { title: 'Reactivate account', button: 'Reactivate', body: (a) => `${a.name} can sign in again with their existing password.` },
 };
@@ -198,7 +220,8 @@ function ConfirmSheet({ pending, onClose, onDone }: { pending: Pending | null; o
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [invite, setInvite] = useState<Invite | null>(null);
-  useEffect(() => { setReason(''); setTried(false); setServerError(null); setInvite(null); }, [pending]);
+  const [resetLink, setResetLink] = useState<ResetLink | null>(null);
+  useEffect(() => { setReason(''); setTried(false); setServerError(null); setInvite(null); setResetLink(null); }, [pending]);
   if (!pending) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
   const cfg = CONFIRM[pending.kind];
   const { account } = pending;
@@ -211,6 +234,7 @@ function ConfirmSheet({ pending, onClose, onDone }: { pending: Pending | null; o
     setBusy(true);
     try {
       if (pending.kind === 'invite') { setInvite(await resendInvite(account.id)); onDone(); return; }
+      if (pending.kind === 'reset') { setResetLink(await issueResetLink(account.id)); return; }
       if (pending.kind === 'deactivate') await deactivateAccount(account.id, reason.trim());
       else await reactivateAccount(account.id);
       toast({ variant: 'success', message: pending.kind === 'deactivate' ? `${account.name} is deactivated.` : `${account.name} is active again.` });
@@ -224,8 +248,10 @@ function ConfirmSheet({ pending, onClose, onDone }: { pending: Pending | null; o
 
   return (
     <Sheet
-      open onClose={onClose} size={480} title={invite ? 'New invite link' : cfg.title} description={invite ? `Send ${account.name} this link.` : cfg.body(account)}
-      footer={invite ? <Button variant="primary" onClick={onClose}>Done</Button> : (
+      open onClose={onClose} size={480}
+      title={invite ? 'New invite link' : resetLink ? 'Password reset link' : cfg.title}
+      description={invite || resetLink ? `Send ${account.name} this link.` : cfg.body(account)}
+      footer={invite || resetLink ? <Button variant="primary" onClick={onClose}>Done</Button> : (
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant={pending.kind === 'deactivate' ? 'danger' : 'primary'} loading={busy} onClick={run}>{cfg.button}</Button>
@@ -233,7 +259,7 @@ function ConfirmSheet({ pending, onClose, onDone }: { pending: Pending | null; o
       )}
     >
       {serverError && <InlineAlert variant="danger" title={serverError} />}
-      {invite ? <InviteLink invite={invite} /> : pending.kind === 'deactivate' && (
+      {resetLink ? <ResetLinkView link={resetLink} /> : invite ? <InviteLink invite={invite} /> : pending.kind === 'deactivate' && (
         <TextArea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} error={tried ? reasonError : undefined} helper="Kept in the audit log." />
       )}
     </Sheet>
@@ -275,6 +301,7 @@ export function AccountsSettings() {
   const actions = (r: Account): MenuItem[] => [
     { label: 'Change account type', onSelect: () => setEditing(r) },
     { label: 'Resend invite', disabled: r.invitation_state === 'Accepted' || isRevoked(r), onSelect: () => setPending({ kind: 'invite', account: r }) },
+    ...(r.invitation_state === 'Accepted' && !isRevoked(r) ? [{ label: 'Reset password link', onSelect: () => setPending({ kind: 'reset', account: r }) }] : []),
     { type: 'separator' },
     isRevoked(r)
       ? { label: 'Reactivate', onSelect: () => setPending({ kind: 'reactivate', account: r }) }

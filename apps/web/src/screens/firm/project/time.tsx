@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { getProjectTime, personName, type TimeRow } from '../../../api';
+import { isLive } from '../../../api/live';
+import { getProjectTimeLive, isForbidden, type LiveProjectTimeRow } from '../../../api/live/project-tabs';
 import { useResource } from '../../../api/useResource';
 import { Avatar } from '../../../ui/Avatar';
 import { Button } from '../../../ui/Button';
@@ -17,7 +19,15 @@ export function ProjectTimeScreen() {
   const [params] = useSearchParams();
   const toast = useToast();
   const { openLogTime } = useOverlays();
-  const { state, data, retry } = useResource(() => getProjectTime(id), [id]);
+  const [denied, setDenied] = useState(false);
+  const { state: loadState, data, retry } = useResource<TimeRow[]>(
+    () => (isLive ? getProjectTimeLive(id).catch((e: unknown) => { if (isForbidden(e)) setDenied(true); throw e; }) : getProjectTime(id)),
+    [id],
+  );
+  const state = denied ? 'denied' : loadState;
+  // Live rows carry the server's name; the sample people list only knows the demo studio.
+  const nameOf = (r: TimeRow) => (isLive ? (r as LiveProjectTimeRow).personName : personName(r.personId));
+  const names = new Map((data ?? []).map((r) => [r.personId, nameOf(r)]));
   const [edits, setEdits] = useState<Record<string, TimeRow>>({});
   const [returning, setReturning] = useState<TimeRow | null>(null);
   const [reason, setReason] = useState('');
@@ -25,7 +35,7 @@ export function ProjectTimeScreen() {
   const all = useMemo(() => (data ?? []).map((r) => edits[r.id] ?? r), [data, edits]);
   const rows = all.filter((r) => (!params.get('person') || r.personId === params.get('person')) && (!params.get('phase') || r.phase === params.get('phase')));
   const filters: FilterDef[] = [
-    { type: 'select', key: 'person', label: 'Person', options: [...new Set(all.map((r) => r.personId))].map((p) => ({ value: p, label: personName(p) })) },
+    { type: 'select', key: 'person', label: 'Person', options: [...new Set(all.map((r) => r.personId))].map((p) => ({ value: p, label: isLive ? names.get(p) ?? p : personName(p) })) },
     { type: 'select', key: 'phase', label: 'Phase', options: [...new Set(all.map((r) => r.phase))].map((p) => ({ value: p, label: p })) },
   ];
   const approve = (r: TimeRow) => {
@@ -40,15 +50,22 @@ export function ProjectTimeScreen() {
     setReturning(null);
   };
   const columns: Column<TimeRow>[] = [
-    { key: 'person', header: 'Person', value: (r) => personName(r.personId), sortable: true, render: (r) => <span className="dt__person"><Avatar name={personName(r.personId)} size={20} />{personName(r.personId)}</span> },
+    { key: 'person', header: 'Person', value: (r) => nameOf(r), sortable: true, render: (r) => <span className="dt__person"><Avatar name={nameOf(r)} size={20} />{nameOf(r)}</span> },
     { key: 'phase', header: 'Phase', value: (r) => r.phase, sortable: true, render: (r) => <span className="stacked"><span>{r.phase}</span>{r.note && <span className="t-caption ink-2">{r.note}</span>}</span> },
     { key: 'draft', header: 'Draft (h)', type: 'hours', value: (r) => r.draft, render: (r) => r.draft.toFixed(2), total: (l) => l.reduce((s, x) => s + x.draft, 0), formatTotal: (n) => n.toFixed(2) },
     { key: 'submitted', header: 'Submitted (h)', type: 'hours', value: (r) => r.submitted, render: (r) => r.submitted.toFixed(2), total: (l) => l.reduce((s, x) => s + x.submitted, 0), formatTotal: (n) => n.toFixed(2) },
+    ...(isLive ? [{
+      key: 'returned', header: 'Returned (h)', type: 'hours', value: (r) => (r as LiveProjectTimeRow).returned, render: (r) => (r as LiveProjectTimeRow).returned.toFixed(2),
+      total: (l) => l.reduce((s, x) => s + (x as LiveProjectTimeRow).returned, 0), formatTotal: (n) => n.toFixed(2),
+    } satisfies Column<TimeRow>] : []),
     { key: 'approved', header: 'Approved (h)', type: 'hours', value: (r) => r.approved, render: (r) => r.approved.toFixed(2), total: (l) => l.reduce((s, x) => s + x.approved, 0), formatTotal: (n) => n.toFixed(2) },
     { key: 'status', header: 'Status', type: 'status', value: (r) => r.status },
     {
       key: 'actions', header: 'Actions', value: () => '',
-      render: (r) => (r.submitted > 0 && r.status !== 'Returned'
+      // Live rows sum many entries, so approving happens per request in Approvals, where the server records it.
+      render: (r) => (isLive
+        ? (r.submitted > 0 ? <Link to="/firm/approvals">Review in Approvals</Link> : <span className="ink-2">None</span>)
+        : r.submitted > 0 && r.status !== 'Returned'
         ? <span className="toolbar"><Button size="dense" onClick={() => approve(r)}>Approve</Button><Button size="dense" variant="ghost" onClick={() => { setReturning(r); setReason(''); setTried(false); }}>Return</Button></span>
         : <span className="ink-2">None</span>),
     },
@@ -56,7 +73,7 @@ export function ProjectTimeScreen() {
   return (
     <>
       <div className="toolbar toolbar--between">
-        <div className="toolbar"><h2 className="t-h2">Time</h2><span className="t-numeric ink-2">01 Sep to 08 Nov 2026</span></div>
+        <div className="toolbar"><h2 className="t-h2">Time</h2>{!isLive && <span className="t-numeric ink-2">01 Sep to 08 Nov 2026</span>}</div>
       </div>
       <FilterBar filters={filters} />
       <DataTable

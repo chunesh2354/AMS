@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ToastProvider } from '../../ui/Toast';
-import { AccountsSettings, EMAIL_NOTE } from './accounts';
+import { AccountsSettings, EMAIL_NOTE, RESET_NOTE } from './accounts';
 import { AcceptInviteScreen } from '../auth/accept-invite';
 
 vi.mock('../../api/live', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../api/live')>()), isLive: true }));
@@ -99,6 +99,64 @@ describe('Accounts settings', () => {
     await userEvent.type(within(sheet).getByLabelText('Job title'), 'Architect');
     await userEvent.click(within(sheet).getByRole('button', { name: 'Create account' }));
     expect(await within(sheet).findByText('This email already has an account.')).toBeInTheDocument();
+  });
+
+  it('issues a password reset link for an accepted account and shows it with the email note', async () => {
+    const posts: string[] = [];
+    handler = (url, init) => {
+      if (init.method === 'POST') posts.push(url);
+      if (url.endsWith('/accounts/a1/reset-link') && init.method === 'POST') {
+        return { status: 200, body: { reset_url: '/reset-password/rtok456', expires_at: '2026-11-10T10:00:00Z', email_sent: false, audit_event_id: 'e2' } };
+      }
+      if (url.endsWith('/accounts')) return list([ACCOUNT]);
+      return undefined;
+    };
+    openAccounts();
+    await screen.findByText('Asha Rao');
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Asha Rao' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Reset password link' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Reset password link' });
+    expect(within(confirm).getByText(/24 hours/)).toBeInTheDocument();
+    expect(posts).toEqual([]);
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Create reset link' }));
+    const done = await screen.findByRole('dialog', { name: 'Password reset link' });
+    expect(posts).toEqual(['/api/v1/accounts/a1/reset-link']);
+    expect((within(done).getByLabelText('Reset link') as HTMLInputElement).value).toBe(`${window.location.origin}/reset-password/rtok456`);
+    expect(within(done).getByRole('button', { name: 'Copy link' })).toBeInTheDocument();
+    expect(within(done).getByText(RESET_NOTE)).toBeInTheDocument();
+  });
+
+  it('offers a reset link only for accepted, active accounts', async () => {
+    handler = (url) => (url.endsWith('/accounts') ? list([
+      { ...ACCOUNT, id: 'a2', name: 'Pending Person', invitation_state: 'Sent' },
+      { ...ACCOUNT, id: 'a3', name: 'Gone Person', login_state: 'Revoked' },
+    ]) : undefined);
+    openAccounts();
+    await screen.findByText('Pending Person');
+    for (const name of ['Pending Person', 'Gone Person']) {
+      await userEvent.click(screen.getByRole('button', { name: `Actions for ${name}` }));
+      expect(screen.getAllByRole('menuitem').length).toBeGreaterThan(0);
+      expect(screen.queryByRole('menuitem', { name: 'Reset password link' })).not.toBeInTheDocument();
+      await userEvent.keyboard('{Escape}');
+    }
+  });
+
+  it('shows the server refusal when only a principal may reset the account', async () => {
+    handler = (url, init) => {
+      if (url.endsWith('/reset-link') && init.method === 'POST') {
+        return { status: 403, body: { error: { code: 'FORBIDDEN_CAPABILITY', message: 'Only a principal can reset the password of a principal or finance account.' } } };
+      }
+      if (url.endsWith('/accounts')) return list([ACCOUNT]);
+      return undefined;
+    };
+    openAccounts();
+    await screen.findByText('Asha Rao');
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Asha Rao' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Reset password link' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Reset password link' });
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Create reset link' }));
+    expect(await within(confirm).findByText('Only a principal can reset the password of a principal or finance account.')).toBeInTheDocument();
+    expect(within(confirm).queryByLabelText('Reset link')).not.toBeInTheDocument();
   });
 
   it('renders permission denied on a 403 list', async () => {

@@ -8,7 +8,8 @@ set -euo pipefail
 : "${AWS_PROFILE:?set AWS_PROFILE}"
 : "${AMS_DOMAIN:?set AMS_DOMAIN}"
 export AWS_REGION="${AWS_REGION:-ap-south-1}"
-AMS_BRANCH="${AMS_BRANCH:-main}"
+# core-path until its PR merges; switch this default back to main after the merge.
+AMS_BRANCH="${AMS_BRANCH:-core-path}"
 AMS_REPO="${AMS_REPO:-https://github.com/chunesh2354/AMS.git}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-t4g.small}"
 AWS="${AWS_CLI:-aws}"
@@ -30,7 +31,7 @@ aws_ s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-con
 aws_ s3api put-bucket-tagging --bucket "$BUCKET" --tagging "TagSet=[{Key=Project,Value=ams}]"
 echo "bucket ${BUCKET}"
 
-# 2. Server role: Session Manager access (no SSH), write backups, store the admin password.
+# 2. Server role: Session Manager access (no SSH), write, list and read back backups (restore.sh), store the admin password.
 if ! aws_ iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
   aws_ iam create-role --role-name "$ROLE" --tags "$TAGS" --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null
 fi
@@ -38,7 +39,8 @@ aws_ iam attach-role-policy --role-name "$ROLE" --policy-arn arn:aws:iam::aws:po
 aws_ iam put-role-policy --role-name "$ROLE" --policy-name ams-server --policy-document "{
   \"Version\":\"2012-10-17\",
   \"Statement\":[
-    {\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::${BUCKET}/db/*\"},
+    {\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\",\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::${BUCKET}/db/*\"},
+    {\"Effect\":\"Allow\",\"Action\":[\"s3:ListBucket\"],\"Resource\":\"arn:aws:s3:::${BUCKET}\",\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"db/*\"]}}},
     {\"Effect\":\"Allow\",\"Action\":[\"ssm:PutParameter\",\"ssm:GetParameter\"],\"Resource\":\"arn:aws:ssm:${AWS_REGION}:${ACCOUNT}:parameter/ams/*\"}
   ]}"
 if ! aws_ iam get-instance-profile --instance-profile-name "$ROLE" >/dev/null 2>&1; then

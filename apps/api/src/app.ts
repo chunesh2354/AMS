@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import { isProduction, SESSION_COOKIE } from './config/env';
 import { ApiError } from './http/errors';
+import { loggerOptions, scrubUrl, type LogOptions } from './http/logging';
+import { authRateLimit, type RateLimitOptions } from './http/rate-limit';
 import type { Api, Handler } from './http/api';
 import { loadActor } from './auth/actor';
 import { hashToken } from './auth/sessions';
@@ -21,15 +23,18 @@ const PUBLIC = new Set(['/api/v1/auth/login', '/api/v1/health', '/api/v1/auth/ac
 export { SESSION_COOKIE };
 export type { Api, Ctx, Handler } from './http/api';
 
-export function buildApp(connectionString: string, opts: { secureCookie?: boolean } = {}) {
+export function buildApp(connectionString: string, opts: { secureCookie?: boolean; log?: LogOptions; rateLimit?: RateLimitOptions } = {}) {
   const pool = createPool(connectionString);
-  const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
+  // JSON logs to stdout (journald in production), silent in tests; client IP from Caddy's X-Forwarded-For only.
+  const app = Fastify({ ...loggerOptions(opts.log), trustProxy: process.env.TRUST_PROXY ?? 'loopback', bodyLimit: 1024 * 1024 });
+  authRateLimit(app, opts.rateLimit);
+  app.addHook('onSend', async (req, reply) => { reply.header('x-request-id', req.id); });
   app.register(cookie);
   app.decorateRequest('actor', null);
 
   app.addHook('onRequest', async (req) => {
     const path = req.url.split('?')[0];
-    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || path.startsWith('/api/v1/auth/invite/') || path.startsWith(PLATFORM_PREFIX)) return;
+    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || path.startsWith('/api/v1/auth/invite/') || path.startsWith('/api/v1/auth/reset/') || path.startsWith(PLATFORM_PREFIX)) return;
     const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
     const token = bearer ?? req.cookies?.[SESSION_COOKIE];
     if (!token) throw new ApiError(401, 'UNAUTHENTICATED', 'Please sign in.');
@@ -41,7 +46,7 @@ export function buildApp(connectionString: string, opts: { secureCookie?: boolea
   // Section 5.3 rule 2: every JSON response passes through the fence.
   app.addHook('preSerialization', async (req, _reply, payload) => redact(payload, req.actor));
 
-  app.setErrorHandler((err: any, _req, reply) => {
+  app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof ApiError) {
       return reply.status(err.status).send({ error: { code: err.code, message: err.message, details: err.details, ...err.extra } });
     }
@@ -52,8 +57,9 @@ export function buildApp(connectionString: string, opts: { secureCookie?: boolea
       return reply.status(400).send({ error: { code: 'VALIDATION', message: 'A value is not valid.', details: [{ field: err.constraint ?? 'value', code: 'invalid' }] } });
     }
     if (err.statusCode && err.statusCode < 500) return reply.status(err.statusCode).send({ error: { code: 'BAD_REQUEST', message: err.message, details: [] } });
-    app.log.error(err);
-    if (!isProduction()) console.error(err);
+    // Every 5xx: the error, request id (reqId, from req.log), method and url. Never the body.
+    req.log.error({ err, method: req.method, url: scrubUrl(req.url) }, 'request failed');
+    if (!isProduction() && req.log.level === 'silent') console.error(err);
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Something went wrong on our side.', details: [] } });
   });
 
