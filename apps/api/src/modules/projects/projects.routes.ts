@@ -37,7 +37,7 @@ async function entitlementOf(tx: Tx, projectId: string) {
   const contracted = (await tx.query(`select coalesce(sum(coalesce(contracted_amount, cap_amount, 0)), 0) as v from fee_component where project_id = $1`, [projectId])).rows[0].v;
   const auth = (await tx.query(
     `select a.amount, (select max(f.cumulative_percent) from fee_authorization f where f.phase_fee_allocation_id = a.id) as pct
-     from phase_fee_allocation a join fee_component c on c.id = a.fee_component_id where c.project_id = $1 and c.billing_method in ('fixed_percent','fixed_milestone')`, [projectId],
+     from phase_fee_allocation a join fee_component c on c.id = a.fee_component_id where c.project_id = $1 and c.billing_method = 'fixed_percent'`, [projectId],
   )).rows;
   let entitled = auth.reduce((s, r) => s + (r.pct ? fixedFeeClaim(toPaise(r.amount), r.pct, 0).entitlement : 0), 0);
   entitled += toPaise((await tx.query(
@@ -101,8 +101,9 @@ const FIXED = ['fixed_percent', 'fixed_milestone'];
 const bad = (field: string, code: string, message: string) => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
 
 /**
- * Phase fees for a fixed fee. Each is a number of at least zero; when any is given they must add up to the
- * contracted fee (in paise, so rounding cannot hide a gap). Returns the contracted amount to store.
+ * Phase fees for a fixed fee. Each is a number of at least zero. A fixed fee needs the contracted fee (above zero) and
+ * a fee for every phase (a single phase takes the whole fee when none is given), adding up to the contracted fee in
+ * paise, so a fixed-fee project can always be authorized and billed. Returns the contracted amount to store.
  */
 function feeAllocations(body: any): string | number | null {
   const contracted = body.contracted_amount == null || body.contracted_amount === '' ? null : Number(body.contracted_amount);
@@ -115,6 +116,13 @@ function feeAllocations(body: any): string | number | null {
     if (f != null && !(Number.isFinite(Number(f)) && Number(f) >= 0)) throw bad(`phases[${i}].fee`, 'range', 'A phase fee must be zero or more.');
     if (f != null) moneyAmount(f, `phases[${i}].fee`, 'A phase fee');
   });
+  if (FIXED.includes(body.billing_method)) {
+    if (contracted == null) throw bad('contracted_amount', 'required', 'A fixed fee needs the contracted fee.');
+    if (!(contracted > 0)) throw bad('contracted_amount', 'range', 'A fixed fee must be above zero.');
+    if (fees.length === 1 && fees[0] == null) { body.phases[0].fee = contracted; fees[0] = contracted; }
+    const gap = fees.findIndex((f) => f == null);
+    if (gap >= 0) throw bad(`phases[${gap}].fee`, 'required', 'A fixed fee needs a fee for every phase.');
+  }
   const given = fees.filter((f) => f != null);
   if (!given.length) return contracted;
   if (!FIXED.includes(body.billing_method) && given.some((f) => Number(f) > 0)) throw bad('phases', 'fee_not_fixed', 'Phase fees apply to a fixed fee only.');
@@ -151,14 +159,54 @@ function membersOf(body: any): { person_id: string; role: MemberRole }[] {
   return out;
 }
 
-/** The creating principal, else the firm's first active principal (so a PM's own time has someone to go to). */
-async function defaultPrincipal(tx: Tx, actor: Actor): Promise<string | null> {
-  if (actor.sets.includes('principal')) return actor.id;
+/**
+ * The creating principal, else the firm's first active principal (so a PM's own time has someone to go to). Never the
+ * PM: their own time must go to someone else. With no other principal it is null and approval routing falls back.
+ */
+async function defaultPrincipal(tx: Tx, actor: Actor, pmId: string): Promise<string | null> {
+  if (actor.sets.includes('principal') && actor.id !== pmId) return actor.id;
   const r = (await tx.query(
     `select g.person_id from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id
-     where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state = 'Active' order by p.ref_code limit 1`,
+     where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state = 'Active' and p.id <> $1 order by p.ref_code limit 1`, [pmId],
   )).rows[0];
   return r?.person_id ?? null;
+}
+
+/** True when the person holds any of these permission sets. */
+async function holdsSet(tx: Tx, personId: string, keys: string[]) {
+  return !!(await tx.query(
+    `select 1 from permission_grant g join permission_set s on s.id = g.permission_set_id where g.person_id = $1 and s.key = any($2::text[])`, [personId, keys],
+  )).rowCount;
+}
+
+/** Active people who can sign in, with their permission sets and the project roles they may hold. */
+async function projectCandidates(tx: Tx) {
+  const rows = (await tx.query(
+    `select p.id, p.ref_code, p.name, p.job_title, p.manager_id, p.employment_state, p.login_state,
+       coalesce(array_agg(distinct s.key) filter (where s.key is not null), '{}') as sets
+     from person p left join permission_grant g on g.person_id = p.id and g.permission_set_id is not null left join permission_set s on s.id = g.permission_set_id
+     where p.employment_state = 'Active' and p.login_state <> 'Revoked' group by p.id order by p.ref_code`,
+  )).rows;
+  return rows.map((r) => {
+    const sets = r.sets as string[];
+    return { ...r, sets, can_be_pm: sets.includes('pm') || sets.includes('principal'), can_be_principal: sets.includes('principal') };
+  });
+}
+
+/** A project's fixed-percent fee component with each phase's allocation, its authorized level and what is billed on it. */
+async function feeState(tx: Tx, projectId: string) {
+  const c = (await tx.query(
+    `select id, contracted_amount from fee_component where project_id = $1 and billing_method = 'fixed_percent' order by created_at limit 1 for update`, [projectId],
+  )).rows[0];
+  if (!c) return null;
+  const phases = (await tx.query(
+    `select ph.id as phase_id, ph.name, a.id as allocation_id, coalesce(a.amount, 0) as amount,
+       coalesce((select max(f.cumulative_percent) from fee_authorization f where f.phase_fee_allocation_id = a.id), 0) as pct,
+       coalesce((select sum(l.current_claim) from billing_line l join billing_draft d on d.id = l.billing_draft_id
+         where l.phase_id = ph.id and l.fee_component_id = $2 and d.approval_state <> 'Rejected'), 0) as billed
+     from phase ph left join phase_fee_allocation a on a.phase_id = ph.id and a.fee_component_id = $2 where ph.project_id = $1 order by ph.sort_order`, [projectId, c.id],
+  )).rows;
+  return { component: c, phases };
 }
 
 export function projectRoutes(api: Api) {
@@ -183,6 +231,60 @@ export function projectRoutes(api: Api) {
     return projectView(tx, p, actor);
   });
 
+  // The wizard's PM and principal pickers: pm_id needs the pm or principal set, principal_id the principal set.
+  get('/project-candidates', async ({ tx, actor, req }) => {
+    authorize(actor, 'projects.create');
+    return list(req, await projectCandidates(tx));
+  });
+
+  /**
+   * Sets a fixed fee: the contracted amount and every phase's fee, adding up to it. A phase cannot go below what is
+   * already authorized or billed on it (422). This is how a project created without fees becomes billable.
+   */
+  put('/projects/:code/fees', async ({ tx, actor, firmId, params, body }) => {
+    const p = await findProject(tx, params.code);
+    if (!can(actor, 'projects.create')) authorize(actor, 'changes.manage', { projectId: p.id });
+    required(body, ['contracted_amount', 'phases']);
+    const contracted = toPaise(moneyAmount(body.contracted_amount, 'contracted_amount', 'The contracted fee', { positive: true }));
+    if (!Array.isArray(body.phases) || !body.phases.length) throw bad('phases', 'array', 'Give a fee for every phase.');
+    const fees = new Map<string, number>();
+    body.phases.forEach((ph: any, i: number) => {
+      if (!ph || !isUuid(ph.phase_id)) throw bad(`phases[${i}].phase_id`, 'unknown', 'Choose a phase of this project.');
+      if (ph.fee == null || !(typeof ph.fee === 'number' || (typeof ph.fee === 'string' && ph.fee.trim() !== ''))) throw bad(`phases[${i}].fee`, 'number', 'A phase fee must be a number.');
+      if (!(Number(ph.fee) >= 0)) throw bad(`phases[${i}].fee`, 'range', 'A phase fee must be zero or more.');
+      if (fees.has(ph.phase_id)) throw bad(`phases[${i}].phase_id`, 'duplicate', 'Each phase appears once.');
+      fees.set(ph.phase_id, toPaise(moneyAmount(ph.fee, `phases[${i}].fee`, 'A phase fee')));
+    });
+    const state = await feeState(tx, p.id);
+    if (!state) throw ruleError('F13', `${p.code} has no fixed fee. Fees by phase apply to a fixed fee only.`);
+    if ([...fees.keys()].some((id) => !state.phases.some((x) => x.phase_id === id))) throw bad('phases', 'unknown', 'Choose phases of this project.');
+    const missing = state.phases.find((x) => !fees.has(x.phase_id));
+    if (missing) throw bad('phases', 'missing', `Give a fee for every phase, including ${missing.name}.`);
+    const sum = [...fees.values()].reduce((s, v) => s + v, 0);
+    if (sum !== contracted) {
+      throw new ApiError(400, 'VALIDATION', `The phase fees add up to ${fromPaise(sum)}, not the contracted fee of ${fromPaise(contracted)}.`, [{ field: 'phases', code: 'fee_sum' }]);
+    }
+    const below: { field: string; code: string; phase_id: string; minimum: string }[] = [];
+    for (const x of state.phases) {
+      const floor = Math.max(fixedFeeClaim(toPaise(x.amount), x.pct, 0).entitlement, toPaise(x.billed));
+      if (fees.get(x.phase_id)! < floor) below.push({ field: 'phases', code: 'below_authorized', phase_id: x.phase_id, minimum: fromPaise(floor) });
+    }
+    if (below.length) {
+      const first = state.phases.find((x) => x.phase_id === below[0]!.phase_id)!;
+      throw ruleError('F13', `${first.name} has ${below[0]!.minimum} authorized or billed already. Its fee cannot go below that.`, below);
+    }
+    const previous = { contracted_amount: state.component.contracted_amount, phases: state.phases.map((x) => ({ phase_id: x.phase_id, fee: x.amount })) };
+    await tx.query('update fee_component set contracted_amount = $2, updated_by = $3, updated_at = now() where id = $1', [state.component.id, fromPaise(contracted), actor.id]);
+    for (const x of state.phases) {
+      const fee = fromPaise(fees.get(x.phase_id)!);
+      if (x.allocation_id) await tx.query('update phase_fee_allocation set amount = $2, updated_by = $3, updated_at = now() where id = $1', [x.allocation_id, fee, actor.id]);
+      else await tx.query('insert into phase_fee_allocation (firm_id, phase_id, fee_component_id, amount, created_by) values ($1,$2,$3,$4,$5)', [firmId, x.phase_id, state.component.id, fee, actor.id]);
+    }
+    const next = { contracted_amount: fromPaise(contracted), phases: state.phases.map((x) => ({ phase_id: x.phase_id, fee: fromPaise(fees.get(x.phase_id)!) })) };
+    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'fee_component', recordId: state.component.id, action: 'set_fees', previous, next });
+    return { contracted_amount: money(next.contracted_amount), phases: next.phases.map((x) => ({ phase_id: x.phase_id, fee: money(x.fee) })), audit_event_id };
+  });
+
   get('/clients', async ({ tx, actor, req }) => {
     authorize(actor, 'projects.create');
     return list(req, (await tx.query('select id, name from client order by name')).rows);
@@ -201,8 +303,12 @@ export function projectRoutes(api: Api) {
     const members = membersOf(body);
     if (!isUuid(body.client_id) || !(await tx.query('select 1 from client where id = $1', [body.client_id])).rowCount) throw bad('client_id', 'unknown', 'Choose a client from this studio.');
     await assertPeopleExist(tx, [body.pm_id], 'pm_id');
-    const principalId = body.principal_id ?? await defaultPrincipal(tx, actor);
-    if (principalId) await assertPeopleExist(tx, [principalId], 'principal_id');
+    if (!(await holdsSet(tx, body.pm_id, ['pm', 'principal']))) throw bad('pm_id', 'not_eligible', 'The project manager must be a PM or a principal.');
+    if (body.principal_id != null) {
+      await assertPeopleExist(tx, [body.principal_id], 'principal_id');
+      if (!(await holdsSet(tx, body.principal_id, ['principal']))) throw bad('principal_id', 'not_eligible', 'The project principal must be a principal.');
+    }
+    const principalId = body.principal_id ?? await defaultPrincipal(tx, actor, body.pm_id);
     await assertPeopleExist(tx, members.map((m) => m.person_id), 'members');
     const dup = await tx.query('select id from project where code = $1', [body.code]);
     if (dup.rowCount) throw conflict('DUPLICATE_CODE', `Project ${body.code} already exists.`, { conflicting_id: dup.rows[0].id });

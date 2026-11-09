@@ -179,8 +179,9 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     const added = types.filter((t) => !before.includes(t));
     const removed = before.filter((t) => !types.includes(t));
     const next = { account_types: types };
-    if (before.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
-      await refuse(actor, firmId, personId, 'Only a principal can change the account types of a principal or finance account.', next);
+    // Any sensitive grant makes the account sensitive (a sensitive set or a single sensitive capability), not only the types.
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can change the account types of a principal, finance or other sensitive account.', next);
     }
     if (added.some((t) => SENSITIVE_TYPES.includes(t)) && personId === actor.id) await refuse(actor, firmId, personId, 'Sensitive account types cannot be given to yourself.', next);
     if ([...added, ...removed].some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
@@ -235,8 +236,8 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     if (personId === actor.id) throw ruleError('accounts.deactivate', 'You cannot deactivate your own account. Ask another admin or principal.');
     const types = await currentTypes(tx, personId);
     if (types.includes('principal')) await assertNotLastPrincipal(tx, personId);
-    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
-      await refuse(actor, firmId, personId, 'Only a principal can deactivate a principal or finance account.', { action: 'deactivate' });
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can deactivate a principal, finance or other sensitive account.', { action: 'deactivate' });
     }
     await tx.query(`update person set login_state = 'Revoked', employment_state = 'Ended', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     await tx.query('update session set revoked_at = now(), updated_at = now(), updated_by = $2 where person_id = $1 and revoked_at is null', [personId, actor.id]);
@@ -254,10 +255,10 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
     const personId = uuidParam(params.id, 'Account');
     const p = (await tx.query('select login_state, employment_state from person where id = $1 for update', [personId])).rows[0];
     if (!p) throw notFound('Account');
-    // Reactivating restores every grant the person still holds, so only a principal may bring back a principal or finance account.
-    const types = await currentTypes(tx, personId);
-    if (types.some((t) => SENSITIVE_TYPES.includes(t)) && !can(actor, 'permissions.grant.sensitive')) {
-      await refuse(actor, firmId, personId, 'Only a principal can reactivate a principal or finance account.', { action: 'reactivate' });
+    // Reactivating restores every grant the person still holds, so only a principal may bring back a sensitive account:
+    // a principal or finance type, or any grant marked sensitive.
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      await refuse(actor, firmId, personId, 'Only a principal can reactivate a principal, finance or other sensitive account.', { action: 'reactivate' });
     }
     await tx.query(`update person set login_state = 'Enabled', employment_state = 'Active', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     const audit_event_id = await audit(tx, actor, firmId, {

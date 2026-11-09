@@ -90,18 +90,20 @@ it('labels Contribution a management estimate and fences it for a PM', async () 
   expect(screen.queryByText('56%')).toBeNull();
 });
 
-it('shows the MOCK integration and the ten settings sections, with Accounts after Permissions and Rates after Accounts', async () => {
+it('shows the MOCK integration and the eleven settings sections, with Accounts after Permissions, Rates after Accounts and Approvals after Templates', async () => {
   openApp('/firm/settings/integrations');
   const card = await screen.findByRole('region', { name: 'Accounting' });
   expect(within(card).getByText('MOCK')).toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: 'Payroll' })).getByText('Not configured')).toBeInTheDocument();
   const links = within(screen.getByRole('navigation', { name: 'Settings' })).getAllByRole('link');
-  expect(links).toHaveLength(10);
+  expect(links).toHaveLength(11);
   const labels = links.map((l) => l.textContent);
   expect(labels.indexOf('Accounts')).toBe(labels.indexOf('Permissions') + 1);
   expect(links[labels.indexOf('Accounts')]).toHaveAttribute('href', '/firm/settings/accounts');
   expect(labels.indexOf('Rates')).toBe(labels.indexOf('Accounts') + 1);
   expect(links[labels.indexOf('Rates')]).toHaveAttribute('href', '/firm/settings/rates');
+  expect(labels.indexOf('Approvals')).toBe(labels.indexOf('Templates') + 1);
+  expect(links[labels.indexOf('Approvals')]).toHaveAttribute('href', '/firm/settings/approvals');
 });
 
 it('blocks an import until the red cells are fixed', async () => {

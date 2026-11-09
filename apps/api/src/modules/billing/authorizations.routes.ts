@@ -1,4 +1,4 @@
-import { toPaise } from '@ams/domain';
+import { fromPaise, percentFee, toPaise } from '@ams/domain';
 import { ApiError, conflict, notFound, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { authorize, can } from '../../auth/authorize';
@@ -9,7 +9,8 @@ import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
 import { findProject } from '../projects/projects.routes';
 
-const FIXED = ['fixed_percent', 'fixed_milestone'];
+/** Billed by authorized percent per phase. A fixed milestone fee bills only through its milestones, so it is never released twice. */
+const FIXED = ['fixed_percent'];
 const SCHEDULED = ['fixed_milestone', 'percent_construction'];
 const bad = (field: string, code: string, message: string) => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
 
@@ -82,9 +83,9 @@ export function feeAuthorizationRoutes({ get, post }: Api) {
     if (!ph) throw bad('phase_id', 'unknown', 'Choose a phase of this project.');
     const a = (await tx.query(
       `select a.id, a.amount from phase_fee_allocation a join fee_component c on c.id = a.fee_component_id
-       where a.phase_id = $1 and c.billing_method in ('fixed_percent','fixed_milestone') order by c.created_at limit 1 for update of a`, [ph.id],
+       where a.phase_id = $1 and c.billing_method = 'fixed_percent' order by c.created_at limit 1 for update of a`, [ph.id],
     )).rows[0];
-    if (!a) throw ruleError('F13', `${ph.name} has no fixed fee to authorize. Hourly work is billed from approved time.`);
+    if (!a) throw ruleError('F13', `${ph.name} has no fixed fee to authorize by percent. Hourly work is billed from approved time; a milestone fee through its milestones.`);
     if (!(toPaise(a.amount) > 0)) throw ruleError('F13', `${ph.name} has no fee allocated, so there is nothing to authorize.`);
     const prev = Number((await tx.query('select coalesce(max(cumulative_percent), 0) v from fee_authorization where phase_fee_allocation_id = $1', [a.id])).rows[0].v);
     if (pct <= prev) throw ruleError('F13', `${ph.name} is already authorized to ${prev}%. A new level must be higher.`, [{ field: 'cumulative_percent', code: 'not_increasing', current: prev }]);
@@ -111,10 +112,23 @@ export function feeAuthorizationRoutes({ get, post }: Api) {
     }
     if (body.fee_component_id != null && !isUuid(body.fee_component_id)) throw bad('fee_component_id', 'unknown', 'Choose a fee component of this project.');
     const c = (await tx.query(
-      `select id, billing_method from fee_component where project_id = $1 and ($2::uuid is null or id = $2) and billing_method = any($3::text[]) order by created_at limit 1`,
+      `select id, billing_method, contracted_amount, cap_amount, fee_percent,
+         (select b.amount from construction_cost_basis b where b.fee_component_id = fee_component.id and b.status = 'Approved' order by b.version_no desc limit 1) as basis_amount
+       from fee_component where project_id = $1 and ($2::uuid is null or id = $2) and billing_method = any($3::text[]) order by created_at limit 1 for update`,
       [p.id, body.fee_component_id ?? null, SCHEDULED],
     )).rows[0];
     if (!c) throw ruleError('F13', 'This project has no milestone or percent-of-construction fee to schedule against.');
+    // The schedule cannot release more than the fee: milestones add up to at most the component's fee (when it is known).
+    const fee = c.contracted_amount != null ? toPaise(c.contracted_amount) : c.cap_amount != null ? toPaise(c.cap_amount)
+      : c.basis_amount != null && c.fee_percent != null ? percentFee(toPaise(c.basis_amount), c.fee_percent) : null;
+    if (fee != null) {
+      const scheduled = toPaise((await tx.query('select coalesce(sum(amount),0) v from billing_milestone where fee_component_id = $1', [c.id])).rows[0].v);
+      const remaining = fee - scheduled;
+      if (toPaise(amount) > remaining) {
+        throw ruleError('F13', `Milestones would add up to more than the fee. ${fromPaise(Math.max(0, remaining))} of ${fromPaise(fee)} is left to schedule.`, [{ field: 'amount', code: 'over_fee', remaining: fromPaise(Math.max(0, remaining)) }]);
+      }
+    }
+
     const row = (await tx.query(
       `insert into billing_milestone (firm_id, fee_component_id, phase_id, label, amount, status, created_by) values ($1,$2,$3,$4,$5,'Planned',$6) returning id`,
       [firmId, c.id, body.phase_id ?? null, body.label.trim().slice(0, 200), amount, actor.id],

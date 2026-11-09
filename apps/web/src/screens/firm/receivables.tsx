@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { getInvoices, hasFinanceAccess, outstanding, personName, type Invoice } from '../../api';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import { amountErrorOf, getLiveReceivables, recordSettlement, type AgeingBuckets, type LiveInvoice, type SettlementKind } from '../../api/live/receivables';
+import { todayIn } from '../../api/live/time';
 import { useResource } from '../../api/useResource';
 import { can, useSession } from '../../app/session';
 import { TODAY } from '../../mock/studio-meridian';
@@ -36,6 +37,13 @@ function liveAgeing(a: AgeingBuckets): BarSegment[] {
   return [seg('Current', a.current, 'ok'), seg('30 d', a.d30, 'warn'), seg('60 d', a.d60, 'danger'), seg('90+ d', a.d90, 'neutral')];
 }
 
+/**
+ * The settlement date the sheet starts on. Live: today in the firm's time zone (from GET /me), so a payment
+ * recorded late in the evening is not filed under the UTC date and never under the sample studio's date.
+ * Mock: the sample studio's TODAY, so screenshots stay stable.
+ */
+export const defaultSettlementDate = (live: boolean, timeZone?: string, now: Date = new Date()) => (live ? todayIn(timeZone, now) : TODAY);
+
 type SaveInput = { id: string; kind: Kind; amount: number; date: string; reference: string; key: string };
 
 function ageing(rows: Invoice[]): BarSegment[] {
@@ -45,11 +53,11 @@ function ageing(rows: Invoice[]): BarSegment[] {
   return [seg('Current', sum((d) => d < 30), 'ok'), seg('30 d', sum((d) => d >= 30 && d < 60), 'warn'), seg('60 d', sum((d) => d >= 60 && d < 90), 'danger'), seg('90+ d', sum((d) => d >= 90), 'neutral')];
 }
 
-function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: boolean; invoice: Invoice | null; invoices: Invoice[]; onClose: () => void; onSave: (input: SaveInput) => void | Promise<string | null> }) {
+function SettlementSheet({ open, invoice, invoices, today, onClose, onSave }: { open: boolean; invoice: Invoice | null; invoices: Invoice[]; today: string; onClose: () => void; onSave: (input: SaveInput) => void | Promise<string | null> }) {
   const [id, setId] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>('Cash');
   const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState<string | null>(TODAY);
+  const [date, setDate] = useState<string | null>(today);
   const [reference, setReference] = useState('');
   const [tried, setTried] = useState(false);
   const [wasOpen, setWasOpen] = useState(false);
@@ -57,7 +65,7 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const openOnes = invoices.filter((i) => outstanding(i) > 0);
-  if (open && !wasOpen) { setWasOpen(true); setId(invoice?.id ?? openOnes[0]?.id ?? null); setKind('Cash'); setAmount(null); setDate(TODAY); setReference(''); setTried(false); setKey(newKey()); setServerError(null); setBusy(false); }
+  if (open && !wasOpen) { setWasOpen(true); setId(invoice?.id ?? openOnes[0]?.id ?? null); setKind('Cash'); setAmount(null); setDate(today); setReference(''); setTried(false); setKey(newKey()); setServerError(null); setBusy(false); }
   if (!open && wasOpen) setWasOpen(false);
   const current = invoices.find((i) => i.id === id);
   const left = current ? outstanding(current) : 0;
@@ -66,7 +74,7 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
   const save = () => {
     if (!current || amountError) { setTried(true); return; }
     if (busy) return;
-    const result = onSave({ id: current.id, kind, amount: amount!, date: date ?? TODAY, reference, key });
+    const result = onSave({ id: current.id, kind, amount: amount!, date: date ?? today, reference, key });
     if (result instanceof Promise) {
       setBusy(true);
       void result.then((err) => { setBusy(false); setServerError(err); });
@@ -82,7 +90,7 @@ function SettlementSheet({ open, invoice, invoices, onClose, onSave }: { open: b
           <Select label="Invoice" options={openOnes.map((i) => ({ value: i.id, label: `${i.id}, ${i.client}` }))} value={id} onChange={setId} />
           <div className="field"><span className="field__label">Type</span><Segmented<Kind> label="Settlement type" value={kind} onChange={setKind} options={(['Cash', 'Withholding', 'Credit'] as Kind[]).map((k) => ({ value: k, label: k }))} /></div>
           <MoneyField label={`${kind} amount`} value={amount} onChange={(v) => { setAmount(v); setServerError(null); }} error={(tried ? amountError : undefined) ?? serverError ?? undefined} />
-          <DateField label="Date" value={date} onChange={setDate} today={TODAY} />
+          <DateField label="Date" value={date} onChange={setDate} today={today} />
           <TextField label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} />
           <dl className="calc"><dt>Remaining after this</dt><dd className={remaining < 0 ? 'calc__danger' : 'calc__strong'}>{formatINR(remaining)}</dd></dl>
         </FormSection>
@@ -106,6 +114,7 @@ export function ReceivablesScreen() {
   );
   const [edits, setEdits] = useState<Record<string, Invoice>>({});
   const [sheet, setSheet] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const today = defaultSettlementDate(isLive, viewer.firm?.timezone);
   const all = useMemo(() => (data?.invoices ?? []).map((i) => edits[i.id] ?? i), [data, edits]);
   const allowed = isLive ? can(viewer, 'receivables.manage') && !denied : hasFinanceAccess(viewer);
   const canRecord = isLive ? can(viewer, 'receivables.manage', { firmWide: true }) : true;
@@ -158,7 +167,7 @@ export function ReceivablesScreen() {
         empty={{ message: 'No invoices match here.', action: <GoTo to="/firm/billing">Open Billing</GoTo> }}
       />
       <SettlementSheet
-        open={sheet.open} invoice={sheet.invoice} invoices={all} onClose={() => setSheet({ open: false, invoice: null })}
+        open={sheet.open} invoice={sheet.invoice} invoices={all} today={today} onClose={() => setSheet({ open: false, invoice: null })}
         onSave={({ id, kind, amount, date, reference, key }) => {
           if (isLive) {
             const target = all.find((x) => x.id === id) as LiveInvoice | undefined;

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Install the server's own files from the checkout in /opt/ams, so a fix in infra/aws reaches existing servers.
-# Used by server-setup.sh (first boot) and deploy.sh (every deploy); safe to run any number of times:
-#   sudo bash /opt/ams/infra/aws/install-server-files.sh
+# Install the server's own files from the root-owned copy of infra/aws in /usr/local/lib/ams, so a fix in
+# infra/aws reaches existing servers. Used by server-setup.sh (first boot) and deploy.sh (every deploy, which
+# first copies infra/aws from the root-owned checkout /opt/ams/src into /usr/local/lib/ams); safe to rerun:
+#   sudo bash /usr/local/lib/ams/install-server-files.sh
+# It refuses a source directory or file that is not owned by root or that group/others can write: root must
+# never install (and later run) a file the ams user could have changed.
 # Installs: the ams-* commands in /usr/local/bin, the backup cron file, the systemd unit (then daemon-reload)
 # and the Caddyfile (validated with `caddy validate` before it replaces the live one and Caddy reloads).
 # It does not restart the API; deploy.sh does that.
 set -euo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-APP_DIR="${APP_DIR:-/opt/ams}"
-SRC="$APP_DIR/infra/aws"
+SRC="${SRC_DIR:-/usr/local/lib/ams}"
 ENV_FILE=/etc/ams/env
 
 log() { echo "[ams-install] $*"; }
@@ -16,6 +18,11 @@ die() { echo "[ams-install] $*" >&2; logger -t ams-install -p user.err "$*" 2>/d
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
 [ -d "$SRC" ] || die "${SRC} not found"
+# Owned by root and not writable by group or others: the directory and every file in it.
+for f in "$SRC" "$SRC"/*; do
+  [ "$(stat -c %u "$f")" = 0 ] || die "${f} is not owned by root; refusing to install from it"
+  [ $(( 0$(stat -c %a "$f") & 022 )) -eq 0 ] || die "${f} is writable by group or others; refusing to install from it"
+done
 [ -r "$ENV_FILE" ] || die "${ENV_FILE} not found (run server-setup.sh first)"
 set -a; . "$ENV_FILE"; set +a
 : "${AMS_DOMAIN:?missing in /etc/ams/env}"

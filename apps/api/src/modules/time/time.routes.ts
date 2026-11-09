@@ -2,7 +2,7 @@ import { addDays, OVER_DAY_HOURS, transition, weekStart } from '@ams/domain';
 import { ApiError, conflict, notFound, rethrowTransition, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { hours, list } from '../../http/responses';
-import { isoDate, required, uuidParam } from '../../http/validation';
+import { isoDate, isUuid, required, uuidParam } from '../../http/validation';
 import { notify } from '../../audit/notify';
 import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
@@ -32,9 +32,29 @@ export async function refreshTimesheet(tx: Tx, timesheetId: string) {
   return status;
 }
 
-/** Fee component: the phase's only one, else the main non-hourly one (decision in docs/decisions.md). */
+/** The calendar date of an instant in the firm's timezone (YYYY-MM-DD), so early-morning work in IST is not dated yesterday. */
+export function localDate(timeZone: string, at: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}
+async function firmToday(tx: Tx, at: Date = new Date()) {
+  const tz = (await tx.query('select timezone from firm')).rows[0]?.timezone as string | undefined;
+  return localDate(tz || 'Asia/Kolkata', at);
+}
+
+/**
+ * Fee component: the phase's only one, else the main non-hourly one (decision in docs/decisions.md). An explicit one
+ * must be allocated to that phase, else 422: time cannot be billed against another project's fee.
+ */
 async function resolveFeeComponent(tx: Tx, phaseId: string, explicit?: string) {
-  if (explicit) return explicit;
+  if (explicit != null) {
+    const ok = isUuid(explicit) && (await tx.query('select 1 from phase_fee_allocation where phase_id = $1 and fee_component_id = $2', [phaseId, explicit])).rowCount;
+    if (!ok) throw ruleError('F10', 'That fee component is not allocated to this phase.', [{ field: 'fee_component_id', code: 'not_on_phase' }]);
+    return explicit;
+  }
   const rows = (await tx.query(
     `select c.id, c.billing_method from phase_fee_allocation a join fee_component c on c.id = a.fee_component_id where a.phase_id = $1`, [phaseId],
   )).rows;
@@ -82,7 +102,7 @@ const ENTRY_SELECT = `select te.*, ph.name as phase_name, pr.code as project_cod
 
 export function timeRoutes({ get, post, put, del }: Api) {
   get('/me/time', async ({ tx, actor, query }) => {
-    const start = weekStart(isoDate(query.period ?? new Date().toISOString().slice(0, 10), 'period'));
+    const start = weekStart(isoDate(query.period ?? await firmToday(tx), 'period'));
     const end = addDays(start, 6);
     const ts = (await tx.query('select id, status, submitted_at from timesheet where person_id = $1 and period_start = $2', [actor.id, start])).rows[0];
     const entries = (await tx.query(`${ENTRY_SELECT} where te.person_id = $1 and te.service_date between $2 and $3 order by te.service_date, te.created_at`, [actor.id, start, end])).rows;
@@ -270,7 +290,9 @@ export function timeRoutes({ get, post, put, del }: Api) {
     if (!t) throw conflict('NO_TIMER', 'No timer is running.');
     const h = (await tx.query(`update timer set ended_at = now() where id = $1 returning extract(epoch from (ended_at - started_at)) / 3600 as h`, [t.id])).rows[0].h;
     const duration = Math.min(24, Math.max(0.01, Number(Number(h).toFixed(2))));
-    const entry = await insertEntry(tx, actor, firmId, { service_date: new Date().toISOString().slice(0, 10), duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id });
+    // The day the work started, in the firm's timezone (a timer started at 05:00 IST is that day's work, not the previous UTC day's).
+    const entry = await insertEntry(tx, actor, firmId, { service_date: await firmToday(tx, new Date(t.started_at)), duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id });
+
     return { time_entry_id: entry.id, duration_hours: hours(duration) };
   });
 

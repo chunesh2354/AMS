@@ -78,6 +78,12 @@ describe('a project created in the wizard can be staffed, timed and billed', () 
   });
 
   it("a PM who is also the project principal has their time sent to the firm's fallback approver, never to themselves", async () => {
+    // A project principal must hold the principal set, so P02 (the PM) is made a principal for this case and reverted after.
+    const set = (await f.owner.query(`select id from permission_set where key = 'principal'`)).rows[0].id;
+    const grant = (await f.owner.query(
+      `insert into permission_grant (firm_id, person_id, permission_set_id, granted_by, reason, sensitive) values ($1,$2,$3,$4,'Test',false) returning id`,
+      [f.firmId, f.id('P02'), set, f.id('P01')],
+    )).rows[0].id;
     expect((await f.call('P01', 'POST', '/projects', project('PRJ-51', { principal_id: f.id('P02') }))).status).toBe(200);
     const cd = await phaseOf('PRJ-51', 'CD');
     expect((await f.call('P02', 'POST', '/time-entries', { service_date: '2026-10-19', duration_hours: 3, phase_id: cd })).status).toBe(200);
@@ -86,6 +92,7 @@ describe('a project created in the wizard can be staffed, timed and billed', () 
     const approver = await approverOf(s.body.approval_request_ids[0]);
     expect(approver).not.toBe(f.id('P02'));
     expect(approver).toBe(f.id('P01'));
+    await f.owner.query('delete from permission_grant where id = $1', [grant]);
   });
 
   it('defaults the principal to the creating principal when the wizard sends none', async () => {
@@ -223,9 +230,10 @@ describe('project team', () => {
     expect(add.body.audit_event_id).toBeTruthy();
     expect(add.body.members.map((m: any) => m.person.ref_code)).toEqual(['P02', 'P05']);
     expect((await f.call('P05', 'GET', '/projects/PRJ-80')).status).toBe(200);
-    // Same person again changes the role, no duplicate row.
-    const lead = await f.call('P02', 'POST', '/projects/PRJ-80/members', { person_id: f.id('P05'), role: 'lead' });
-    expect(lead.body.members.find((m: any) => m.person.ref_code === 'P05').role).toBe('lead');
+    // Same person again changes the role, no duplicate row. (A PM may not name a lead: only a firm-wide planner can.)
+    const lead = await f.call('P02', 'POST', '/projects/PRJ-80/members', { person_id: f.id('P05'), role: 'reviewer' });
+    expect(lead.body.members.find((m: any) => m.person.ref_code === 'P05').role).toBe('reviewer');
+    expect(lead.body.members.filter((m: any) => m.person.ref_code === 'P05')).toHaveLength(1);
     const del = await f.call('P02', 'DELETE', `/projects/PRJ-80/members/${f.id('P05')}`);
     expect(del.status).toBe(200);
     expect(del.body.members.map((m: any) => m.person.ref_code)).toEqual(['P02']);

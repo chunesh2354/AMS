@@ -98,8 +98,10 @@ set -euo pipefail
 exec > /var/log/ams-setup.log 2>&1
 export AMS_DOMAIN='${AMS_DOMAIN}' AMS_BACKUP_BUCKET='${BUCKET}' AWS_REGION='${AWS_REGION}' AMS_BRANCH='${AMS_BRANCH}' AMS_REPO='${AMS_REPO}' AMS_ALERT_TOPIC_ARN='${TOPIC_ARN}'
 apt-get update -y && apt-get install -y git
-[ -d /opt/ams/.git ] || git clone --branch "\$AMS_BRANCH" "\$AMS_REPO" /opt/ams
-bash /opt/ams/infra/aws/server-setup.sh
+# Root-owned checkout: root never runs a file the ams user can change (infra/aws/README.md).
+install -d -m 755 -o root -g root /opt/ams
+[ -d /opt/ams/src/.git ] || git clone --branch "\$AMS_BRANCH" "\$AMS_REPO" /opt/ams/src
+bash /opt/ams/src/infra/aws/server-setup.sh
 EOF
   INSTANCE=$(aws_ ec2 run-instances --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
     --iam-instance-profile "Name=${ROLE}" --security-group-ids "$SG" \

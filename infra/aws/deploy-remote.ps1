@@ -10,9 +10,9 @@
 .NOTES
   Without -InstanceId it finds the running instance tagged Name=ams-staging.
   The branch deployed is AMS_BRANCH in /etc/ams/env on the server.
-  ams-deploy reinstalls the server files (ams-* commands, backup cron, systemd unit, Caddyfile) from the new
-  checkout. A server whose ams-deploy predates that is brought up to date by the second part of the command:
-  after the old ams-deploy has pulled the new code, it runs infra/aws/install-server-files.sh once.
+  ams-deploy reinstalls the server files (ams-* commands, backup cron, systemd unit, Caddyfile) from the
+  root-owned copy of the new checkout, builds as the ams user, swaps the release in and rolls back if the API
+  is not healthy (infra/aws/README.md).
 #>
 [CmdletBinding()]
 param(
@@ -38,7 +38,7 @@ if (-not $InstanceId) {
 }
 Write-Host "[deploy-remote] instance $InstanceId ($Region, profile $AwsProfile)"
 
-$remote = '/usr/local/bin/ams-deploy && if ! grep -q install-server-files.sh /usr/local/bin/ams-deploy; then bash /opt/ams/infra/aws/install-server-files.sh; fi'
+$remote = '/usr/local/bin/ams-deploy'
 $params = '{"commands":["' + $remote + '"],"executionTimeout":["' + $TimeoutSeconds + '"]}'
 $paramFile = New-TemporaryFile
 try {

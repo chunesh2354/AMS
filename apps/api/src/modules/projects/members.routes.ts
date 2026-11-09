@@ -1,6 +1,6 @@
 import { ApiError, conflict, notFound } from '../../http/errors';
 import { audit } from '../../audit/audit';
-import { assertProjectVisible, authorize } from '../../auth/authorize';
+import { assertProjectVisible, authorize, hasFirmCap } from '../../auth/authorize';
 import { list } from '../../http/responses';
 import { isUuid, required } from '../../http/validation';
 import type { Tx } from '../../db/pool';
@@ -50,6 +50,12 @@ export function memberRoutes({ get, post, del }: Api) {
     await assertPeopleExist(tx, [body.person_id], 'person_id');
     if (body.person_id === p.pm_id) throw conflict('IS_PM', 'This person is the project manager already.');
     const prev = (await tx.query('select id, project_role from project_membership where project_id = $1 and person_id = $2', [p.id, body.person_id])).rows[0];
+    // A lead holds scoped capabilities on the project (approving time, preparing billing), so only a firm-wide planner
+    // gives or takes that role. A PM adds contributors, reviewers and viewers.
+    if ((role === 'lead' || prev?.project_role === 'lead') && role !== prev?.project_role && !hasFirmCap(actor, 'projects.plan')) {
+      throw new ApiError(403, 'FORBIDDEN_CAPABILITY', 'Only someone with firm-wide projects.plan can assign or change the lead role.', [], { capability: 'projects.plan' });
+    }
+
     if (prev) {
       await tx.query('update project_membership set project_role = $2, updated_by = $3, updated_at = now() where id = $1', [prev.id, role, actor.id]);
     } else {

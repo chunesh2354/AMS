@@ -1,5 +1,7 @@
 # Caddy gets and renews the HTTPS certificate on its own once DNS points at this server.
-# server-setup.sh replaces {$AMS_DOMAIN} when it installs this file.
+# install-server-files.sh replaces {$AMS_DOMAIN} when it installs this file.
+# /opt/ams/web/dist-live is root-owned; ams-deploy swaps a new build in with a rename (the previous one stays
+# as dist-live.prev), so it is never empty or half-written while Caddy serves it.
 {$AMS_DOMAIN} {
 	encode zstd gzip
 
@@ -16,7 +18,7 @@
 	}
 
 	handle {
-		root * /opt/ams/apps/web/dist-live
+		root * /opt/ams/web/dist-live
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 		try_files {path} /index.html

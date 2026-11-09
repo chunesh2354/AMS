@@ -110,3 +110,12 @@ export const authorizeFee = (code: string, body: { phase_id: string; cumulative_
 export const createMilestone = (code: string, body: { label: string; amount: number; phase_id?: string }) =>
   apiFetch<{ id: string; status: string }>(`/projects/${encodeURIComponent(code)}/milestones`, { method: 'POST', body });
 export const authorizeMilestone = (id: string) => apiFetch<{ id: string; status: string }>(`/milestones/${encodeURIComponent(id)}/authorize`, { method: 'POST' });
+
+// ---------- Fixed fee by phase (Billing tab) ----------
+
+export type ProjectFees = { contracted_amount: number; phases: { phase_id: string; fee: number }[] };
+/** PUT /projects/:code/fees: the contracted fee and every phase's fee, which must add up to it. */
+export const saveProjectFees = (code: string, body: ProjectFees) =>
+  apiFetch<{ contracted_amount: LiveMoney; phases: { phase_id: string; fee: LiveMoney }[]; audit_event_id: string }>(
+    `/projects/${encodeURIComponent(code)}/fees`, { method: 'PUT', body },
+  );

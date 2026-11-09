@@ -1,5 +1,5 @@
-import { transition } from '@ams/domain';
-import { ApiError, notFound, rethrowTransition } from '../../http/errors';
+import { capabilityMap, strongest, transition, type Level, type PermissionSetKey } from '@ams/domain';
+import { ApiError, notFound, rethrowTransition, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { hours, list, money } from '../../http/responses';
 import { isoDate, required, uuidParam } from '../../http/validation';
@@ -9,51 +9,94 @@ import type { Actor } from '../../auth/actor';
 import { refreshTimesheet } from '../time/time.routes';
 import { approveDraftInTx, rejectDraftInTx } from '../billing/billing.routes';
 import type { Api } from '../../http/api';
+import { approvalSettingsRoutes } from './approvals-settings.routes';
 
-export async function resolvePersonApprover(tx: Tx, personId: string) {
+/** What a submitter is told when nobody can approve their work: the studio has to name an approver. */
+export const NO_APPROVER_MESSAGE = 'Nobody else in the studio can approve this. Ask a principal to set a fallback approver in Settings, Approvals.';
+/** Recorded with the self_approval_override audit, and shown in the inbox, when a sole principal approves their own work. */
+export const SOLE_PRINCIPAL_REASON = 'Self-approved: no other approver in the studio';
+
+/** The level at which a person holds a capability, from their permission sets and direct grants. */
+export async function personCapabilityLevel(tx: Tx, personId: string, capability: string): Promise<Level | null> {
+  const grants = (await tx.query(
+    `select g.capability, g.scope_type, s.key from permission_grant g left join permission_set s on s.id = g.permission_set_id where g.person_id = $1`, [personId],
+  )).rows;
+  let level: Level | null = capabilityMap(grants.filter((g) => g.key).map((g) => g.key as PermissionSetKey))[capability] ?? null;
+  for (const g of grants.filter((x) => x.capability === capability)) level = strongest(level, g.scope_type === 'firm' ? 'firm' : 'scoped');
+  return level;
+}
+/** Holding a decision capability means holding it firm-wide or for projects; view and own levels decide nothing. */
+export const actsWith = (level: Level | null | undefined) => level === 'firm' || level === 'scoped';
+
+/** An active, enabled person who holds time.approve: the only kind of person who may be the firm's fallback approver. */
+export async function canApproveTime(tx: Tx, personId: string) {
+  const p = (await tx.query('select login_state, employment_state from person where id = $1', [personId])).rows[0];
+  if (!p || p.login_state !== 'Enabled' || p.employment_state !== 'Active') return false;
+  return actsWith(await personCapabilityLevel(tx, personId, 'time.approve'));
+}
+
+async function isPrincipal(tx: Tx, personId: string) {
+  return !!(await tx.query(
+    `select 1 from permission_grant g join permission_set s on s.id = g.permission_set_id where g.person_id = $1 and s.key = 'principal' limit 1`, [personId],
+  )).rowCount;
+}
+
+/** Internal time: the person's internal time approver, else their manager, else any other principal (null when there is none). */
+export async function resolvePersonApprover(tx: Tx, personId: string): Promise<string | null> {
   const p = (await tx.query('select internal_time_approver_id, manager_id from person where id = $1', [personId])).rows[0];
   if (p?.internal_time_approver_id ?? p?.manager_id) return (p.internal_time_approver_id ?? p.manager_id) as string;
   return anyPrincipal(tx, personId);
 }
-async function anyPrincipal(tx: Tx, except?: string) {
+/** Any active principal other than `except`, or null. Never hands back the person it was asked to skip. */
+async function anyPrincipal(tx: Tx, except: string): Promise<string | null> {
   const r = (await tx.query(
     `select g.person_id from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id
-     where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state = 'Active' and ($1::uuid is null or g.person_id <> $1) order by p.ref_code limit 1`, [except ?? null],
+     where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state = 'Active' and g.person_id <> $1 order by p.ref_code limit 1`, [except],
   )).rows[0];
-  return (r?.person_id ?? except) as string;
+  return (r?.person_id ?? null) as string | null;
 }
 
-/** The firm's fallback approver, else any other principal. Never the submitter while someone else exists. */
-async function firmFallback(tx: Tx, submitter: string) {
+/** The firm's fallback approver (active and holding time.approve), else any other principal, else null. Never the submitter. */
+async function firmFallback(tx: Tx, submitter: string): Promise<string | null> {
   const firm = (await tx.query('select fallback_approver_id from firm')).rows[0];
-  if (firm?.fallback_approver_id && firm.fallback_approver_id !== submitter) {
-    const f = (await tx.query('select login_state, employment_state from person where id = $1', [firm.fallback_approver_id])).rows[0];
-    if (f && f.login_state === 'Enabled' && f.employment_state === 'Active') return firm.fallback_approver_id as string;
-  }
+  if (firm?.fallback_approver_id && firm.fallback_approver_id !== submitter && await canApproveTime(tx, firm.fallback_approver_id)) return firm.fallback_approver_id as string;
   return anyPrincipal(tx, submitter);
 }
 
 /**
+ * Nobody but the submitter can approve. A principal (a one-principal studio) gets their own work back and may approve it,
+ * recorded as a self_approval_override; anyone else is told to ask the studio to set an approver (422 NO_APPROVER).
+ */
+async function selfOrRefuse(tx: Tx, submitter: string): Promise<string> {
+  if (await isPrincipal(tx, submitter)) return submitter;
+  throw ruleError('NO_APPROVER', NO_APPROVER_MESSAGE);
+}
+
+/**
  * Who approves project time. Staff time goes to the PM. A PM's own time goes to the project principal, then the
- * firm's fallback approver, then any other principal: never back to the submitter (that would be SELF_APPROVAL).
+ * firm's fallback approver, then any other principal. Only when nobody else exists does a principal approve their own.
  */
 export async function projectTimeApprover(tx: Tx, project: { pm_id: string; principal_id: string | null }, submitter: string) {
   if (project.pm_id !== submitter) return routeApprover(tx, project.pm_id, submitter);
   if (project.principal_id && project.principal_id !== submitter) return routeApprover(tx, project.principal_id, submitter);
-  return firmFallback(tx, submitter);
+  return routeApprover(tx, null, submitter);
 }
 
-/** Section 5.3 rule 6: substitute in date range, then the firm's fallback, then any principal. The submitter never approves their own work. */
-export async function routeApprover(tx: Tx, designated: string, submitter: string) {
-  if (designated === submitter) return firmFallback(tx, submitter);
-  const p = (await tx.query('select login_state, employment_state from person where id = $1', [designated])).rows[0];
-  const sub = (await tx.query(
-    `select s.substitute_id from substitute s join person q on q.id = s.substitute_id
-     where s.approver_id = $1 and current_date between s.from_date and s.to_date and q.login_state = 'Enabled' and q.id <> $2 limit 1`, [designated, submitter],
-  )).rows[0];
-  if (sub) return sub.substitute_id as string;
-  if (p && p.login_state === 'Enabled' && p.employment_state === 'Active') return designated;
-  return firmFallback(tx, submitter);
+/**
+ * Section 5.3 rule 6: substitute in date range, then the firm's fallback, then any principal. The submitter never
+ * approves their own work while anyone else can: a sole principal does, and anyone else gets 422 NO_APPROVER.
+ */
+export async function routeApprover(tx: Tx, designated: string | null, submitter: string): Promise<string> {
+  if (designated && designated !== submitter) {
+    const p = (await tx.query('select login_state, employment_state from person where id = $1', [designated])).rows[0];
+    const sub = (await tx.query(
+      `select s.substitute_id from substitute s join person q on q.id = s.substitute_id
+       where s.approver_id = $1 and current_date between s.from_date and s.to_date and q.login_state = 'Enabled' and q.id <> $2 limit 1`, [designated, submitter],
+    )).rows[0];
+    if (sub) return sub.substitute_id as string;
+    if (p && p.login_state === 'Enabled' && p.employment_state === 'Active') return designated;
+  }
+  return (await firmFallback(tx, submitter)) ?? selfOrRefuse(tx, submitter);
 }
 
 async function loadRequest(tx: Tx, id: string) {
@@ -64,11 +107,32 @@ async function loadRequest(tx: Tx, id: string) {
 function assertApprover(actor: Actor, r: any) {
   if (r.approver_id !== actor.id && r.delegated_to_id !== actor.id) throw new ApiError(403, 'FORBIDDEN_CAPABILITY', 'This approval is in someone else\'s queue.', [], { capability: 'time.approve' });
 }
+/** The capability a decision on this kind of request needs. */
+const capabilityFor = (type: string) => (type === 'billing_draft' ? 'billing.approve' : type === 'time' || type === 'internal_time' ? 'time.approve' : null);
+/** Being the routed approver is not enough: the actor must also hold the capability for the request type. */
+function assertCanDecide(actor: Actor, r: any) {
+  assertApprover(actor, r);
+  const cap = capabilityFor(r.type);
+  if (cap && !actsWith(actor.caps[cap])) throw new ApiError(403, 'FORBIDDEN_CAPABILITY', `You need ${cap} for this.`, [], { capability: cap });
+}
+/** Routing sent the work back to its submitter: only ever a principal with nobody else in the studio to approve. */
+const routedToSelf = (r: any) => r.approver_id === r.submitter_id;
+/**
+ * The submitter may approve only when the firm allows self-approval, or when routing sent a principal's own work back to
+ * them because nobody else in the studio can approve. Both are recorded as self_approval_override.
+ */
 async function assertNotSelf(tx: Tx, actor: Actor, firmId: string, r: any) {
   if (r.submitter_id !== actor.id) return;
   const f = (await tx.query('select allow_self_approval from firm')).rows[0];
-  if (!f.allow_self_approval) throw new ApiError(403, 'SELF_APPROVAL', 'You cannot approve your own submission.', [], { capability: 'time.approve' });
-  await audit(tx, actor, firmId, { recordType: 'approval_request', recordId: r.id, action: 'self_approval_override' });
+  if (f.allow_self_approval) {
+    await audit(tx, actor, firmId, { recordType: 'approval_request', recordId: r.id, action: 'self_approval_override' });
+    return;
+  }
+  if (routedToSelf(r) && actor.sets.includes('principal')) {
+    await audit(tx, actor, firmId, { recordType: 'approval_request', recordId: r.id, action: 'self_approval_override', reason: SOLE_PRINCIPAL_REASON });
+    return;
+  }
+  throw new ApiError(403, 'SELF_APPROVAL', 'You cannot approve your own submission.', [], { capability: 'time.approve' });
 }
 
 /** Rates are stored at approval, for the service date, so later rate changes never reprice history (R13, AT-19). */
@@ -87,7 +151,7 @@ async function entriesOf(tx: Tx, requestId: string) {
 }
 
 async function approveRequest(tx: Tx, actor: Actor, firmId: string, r: any, reason?: string) {
-  assertApprover(actor, r);
+  assertCanDecide(actor, r);
   await assertNotSelf(tx, actor, firmId, r);
   let next: string;
   try { next = transition('approvalRequest', r.status, 'approve'); } catch (e) { rethrowTransition(e); }
@@ -126,6 +190,8 @@ async function view(tx: Tx, r: any) {
     submitter: { id: r.submitter_id, name: r.submitter_name }, approver: { id: r.approver_id, name: r.approver_name },
     delegated_to_id: r.delegated_to_id, project: r.project_code ? { code: r.project_code, name: r.project_name } : null,
     exception_flags: r.exception_flags, age_days: r.age_days,
+    // Routed back to its submitter: a sole principal approving their own work, labelled in the inbox.
+    self_approval: routedToSelf(r),
     period: ts ? { start: ts.period_start, end: ts.period_end } : null,
     hours: r.type === 'billing_draft' ? null : hours(total),
     amount: draft ? money(draft.total) : null, draft_no: draft?.draft_no ?? null,
@@ -138,7 +204,9 @@ const LIST_SQL = `select a.*, s.name as submitter_name, ap.name as approver_name
     (current_date - a.created_at::date) as age_days
   from approval_request a join person s on s.id = a.submitter_id join person ap on ap.id = a.approver_id left join project pr on pr.id = a.project_id`;
 
-export function approvalRoutes({ get, post, pool }: Api) {
+export function approvalRoutes(api: Api) {
+  const { get, post, pool } = api;
+  approvalSettingsRoutes(api);
   // Everyone sees only their own queue (F11).
   get('/approvals', async ({ tx, actor, query, req }) => {
     const rows = (await tx.query(
@@ -169,7 +237,7 @@ export function approvalRoutes({ get, post, pool }: Api) {
   post('/approvals/:id/return', async ({ tx, actor, firmId, params, body }) => {
     required(body, ['reason']);
     const r = await loadRequest(tx, uuidParam(params.id, 'Approval'));
-    assertApprover(actor, r);
+    assertCanDecide(actor, r);
     try { transition('approvalRequest', r.status, 'return'); } catch (e) { rethrowTransition(e); }
     let closed = true;
     if (r.type === 'time' || r.type === 'internal_time') {
@@ -195,7 +263,7 @@ export function approvalRoutes({ get, post, pool }: Api) {
   post('/approvals/:id/reject', async ({ tx, actor, firmId, params, body }) => {
     required(body, ['reason']);
     const r = await loadRequest(tx, uuidParam(params.id, 'Approval'));
-    assertApprover(actor, r);
+    assertCanDecide(actor, r);
     try { transition('approvalRequest', r.status, 'reject'); } catch (e) { rethrowTransition(e); }
     if (r.type === 'billing_draft') await rejectDraftInTx(tx, actor, firmId, r.record_id, body.reason);
     await tx.query(`update approval_request set status = 'Rejected', updated_by = $2, updated_at = now() where id = $1`, [r.id, actor.id]);

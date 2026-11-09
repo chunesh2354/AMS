@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, UserMinus, UserPlus, Users } from 'lucide-react';
 import { getPeople, personName, type Person } from '../../api';
+import { isLive } from '../../api/live';
 import { useResource } from '../../api/useResource';
 import { Avatar, AvatarGroup } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
@@ -13,6 +14,10 @@ import { StatusChip } from '../../ui/StatusChip';
 import { AddPersonSheet } from './add-person-sheet';
 import { DeactivateSheet } from './person-sheets';
 
+/** Live mode creates people as accounts in Settings; the Add person wizard here is the sample studio's demo sheet. */
+export const ADD_PEOPLE_NOTE = 'Add people from Settings, Accounts';
+const ACCOUNTS_PATH = '/firm/settings/accounts';
+
 type Tab = 'Active' | 'Invited' | 'Pending' | 'Deactivated';
 const options = (values: string[]) => [...new Set(values)].sort().map((v) => ({ value: v, label: v }));
 
@@ -20,7 +25,7 @@ export function PeopleScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { state, data, retry } = useResource(getPeople, []);
-  const [adding, setAdding] = useState(params.get('add') === '1');
+  const [adding, setAdding] = useState(!isLive && params.get('add') === '1');
   const [deactivating, setDeactivating] = useState<Person | null>(null);
   const tab = (params.get('status') as Tab) || 'Active';
   const people = useMemo(() => data ?? [], [data]);
@@ -81,7 +86,9 @@ export function PeopleScreen() {
       <PageHeader
         title="People"
         meta={state !== 'loading' && <span className="t-numeric ink-2">{people.length} people</span>}
-        primaryAction={<Button variant="primary" icon={<UserPlus size={20} strokeWidth={1.5} aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}
+        primaryAction={isLive
+          ? <Button variant="secondary" onClick={() => navigate(ACCOUNTS_PATH)}>{ADD_PEOPLE_NOTE}</Button>
+          : <Button variant="primary" icon={<UserPlus size={20} strokeWidth={1.5} aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}
       />
       <div className="chip-row">
         <Segmented<Tab> label="Status" value={tab} onChange={setTab} options={(['Active', 'Invited', 'Pending', 'Deactivated'] as Tab[]).map((v) => ({ value: v, label: v }))} />
@@ -91,13 +98,13 @@ export function PeopleScreen() {
         label="People" columns={columns} rows={state === 'empty' ? [] : rows} rowKey={(p) => p.id} state={state === 'ready' && !rows.length ? 'empty' : state}
         columnPicker onRetry={retry} capability="view people"
         onRowClick={(p) => navigate(`/firm/people/${p.id}`)}
-        empty={{ icon: <Users size={20} strokeWidth={1.5} aria-hidden />, message: emptyFor[tab], action: <Button variant="primary" onClick={() => setAdding(true)}>Add person</Button> }}
+        empty={{ icon: <Users size={20} strokeWidth={1.5} aria-hidden />, message: emptyFor[tab], action: isLive ? <Button variant="primary" onClick={() => navigate(ACCOUNTS_PATH)}>{ADD_PEOPLE_NOTE}</Button> : <Button variant="primary" onClick={() => setAdding(true)}>Add person</Button> }}
         rowActions={(p) => [
           { label: 'View profile', icon: <Eye size={16} strokeWidth={1.5} aria-hidden />, onSelect: () => navigate(`/firm/people/${p.id}`) },
           { label: 'Deactivate', icon: <UserMinus size={16} strokeWidth={1.5} aria-hidden />, danger: true, onSelect: () => setDeactivating(p) },
         ]}
       />
-      <AddPersonSheet open={adding} onClose={() => setAdding(false)} people={people} />
+      {!isLive && <AddPersonSheet open={adding} onClose={() => setAdding(false)} people={people} />}
       <DeactivateSheet person={deactivating} onClose={() => setDeactivating(null)} />
     </>
   );

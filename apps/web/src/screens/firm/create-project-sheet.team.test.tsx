@@ -20,15 +20,15 @@ const bodyOf = (init: RequestInit) => JSON.parse(String(init.body ?? '{}'));
 const projectPosts = () => fetchMock.mock.calls.filter(([u, i]) => String(u).endsWith('/projects') && (i as RequestInit | undefined)?.method === 'POST');
 
 const PEOPLE = [
-  { id: 'u-asha', ref_code: 'P01', name: 'Asha Rao', job_title: 'Principal', manager_id: null, employment_state: 'Active', login_state: 'Enabled' },
-  { id: 'u-vikram', ref_code: 'P02', name: 'Vikram Nair', job_title: 'Project architect', manager_id: 'u-asha', employment_state: 'Active', login_state: 'Enabled' },
-  { id: 'u-rohan', ref_code: 'P04', name: 'Rohan Shetty', job_title: 'Senior architect', manager_id: 'u-vikram', employment_state: 'Active', login_state: 'Enabled' },
+  { id: 'u-asha', ref_code: 'P01', name: 'Asha Rao', job_title: 'Principal', manager_id: null, employment_state: 'Active', login_state: 'Enabled', sets: ['principal'], can_be_pm: true, can_be_principal: true },
+  { id: 'u-vikram', ref_code: 'P02', name: 'Vikram Nair', job_title: 'Project architect', manager_id: 'u-asha', employment_state: 'Active', login_state: 'Enabled', sets: ['pm'], can_be_pm: true, can_be_principal: false },
+  { id: 'u-rohan', ref_code: 'P04', name: 'Rohan Shetty', job_title: 'Senior architect', manager_id: 'u-vikram', employment_state: 'Active', login_state: 'Enabled', sets: ['staff'], can_be_pm: false, can_be_principal: false },
 ];
 const ME = (sets: string[]) => ({ status: 200, body: { person: { id: 'u-asha', ref_code: 'P01', name: 'Asha Rao' }, permission_sets: sets, capabilities: {}, led_projects: [], member_projects: [] } });
 
 const directory = (sets: string[]): Handler => (url, init) => {
   if (url.endsWith('/clients') && (init.method ?? 'GET') === 'GET') return list([{ id: 'c-lake', name: 'Lakeview Trust' }]);
-  if (url.endsWith('/people')) return list(PEOPLE);
+  if (url.endsWith('/project-candidates')) return list(PEOPLE);
   if (url.endsWith('/me')) return ME(sets);
   if (url.endsWith('/projects') && init.method === 'POST') return { status: 200, body: { id: 'p-new', code: 'PRJ-07', principal_id: 'u-asha', audit_event_id: 'e' } };
   return undefined;
@@ -144,5 +144,53 @@ describe('create project wizard, fee and team', () => {
     await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
     await screen.findByRole('heading', { name: 'Opened PRJ-07' });
     expect(bodyOf(projectPosts()[0]![1] as RequestInit)).toMatchObject({ billing_method: 'hourly_nte', cap_amount: 500000 });
+  });
+});
+
+describe('create project wizard, required fees and eligible people', () => {
+  it('needs the contracted fee for a fixed fee before it moves on, and never says it can be set later', async () => {
+    handler = directory(['principal']);
+    const sheet = await openSheet();
+    await firstStep(sheet);
+    await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    expect(within(sheet).queryByText(/can be set later/)).toBeNull();
+    await next(sheet);
+    expect(within(sheet).getByText('Enter the contracted fee')).toBeInTheDocument();
+    expect(within(sheet).getByLabelText('Contracted fee')).toBeInTheDocument();
+    // Clearing one phase's fee is refused too: every phase needs a fee.
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '400000');
+    await userEvent.clear(within(sheet).getByLabelText('Concept design fee'));
+    await next(sheet);
+    expect(within(sheet).getByRole('alert')).toHaveTextContent('Enter a fee for every phase');
+    expect(projectPosts()).toHaveLength(0);
+  });
+
+  it('lists only PMs and principals as project manager, and only principals other than the PM as principal', async () => {
+    handler = directory(['principal']);
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByRole('combobox', { name: 'Project manager' }));
+    expect(await screen.findByRole('option', { name: /Vikram Nair/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Asha Rao/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Rohan Shetty/ })).toBeNull();
+    // Asha (the creating principal) as PM: she is no longer the principal, and the principal list leaves her out.
+    await userEvent.click(screen.getByRole('option', { name: /Asha Rao/ }));
+    await userEvent.type(within(sheet).getByLabelText('Project code'), 'PRJ-07');
+    await userEvent.type(within(sheet).getByLabelText('Name'), 'Riverside Homes');
+    await pick(sheet, 'Client', 'Lakeview Trust');
+    await next(sheet);
+    await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '400000');
+    await next(sheet);
+    const principal = within(sheet).getByRole('combobox', { name: 'Principal' });
+    expect(principal).toHaveValue('');
+    await userEvent.click(principal);
+    expect(screen.queryByRole('option', { name: /Asha Rao/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /Vikram Nair/ })).toBeNull();
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
+    await screen.findByRole('heading', { name: 'Opened PRJ-07' });
+    const body = bodyOf(projectPosts()[0]![1] as RequestInit);
+    expect(body.pm_id).toBe('u-asha');
+    expect(body.principal_id).toBeUndefined();
   });
 });

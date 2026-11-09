@@ -11,6 +11,12 @@ export const listClients = async (): Promise<Client[]> => (await apiFetch<ListRe
 export const createClient = (name: string) => apiFetch<Client & { audit_event_id: string }>('/clients', { method: 'POST', body: { name } });
 export const listDirectory = async (): Promise<DirectoryPerson[]> => (await apiFetch<ListResponse<DirectoryPerson>>('/people')).data;
 
+/** An active person with their permission sets and the project roles they may hold (GET /project-candidates). */
+export type CandidatePerson = DirectoryPerson & { sets: string[]; can_be_pm: boolean; can_be_principal: boolean };
+/** The wizard's people: a PM needs the pm or principal set, a project principal the principal set. */
+export const listProjectCandidates = async (): Promise<CandidatePerson[]> => (await apiFetch<ListResponse<CandidatePerson>>('/project-candidates')).data;
+
+
 export type RateVersion = { id: string; amount: LiveMoney; effective_from: string };
 export type RateCardRow = {
   person: { id: string; ref_code: string; name: string; job_title: string | null; employment_state: string };

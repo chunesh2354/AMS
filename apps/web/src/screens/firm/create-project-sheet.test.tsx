@@ -18,8 +18,8 @@ const bodyOf = (init: RequestInit) => JSON.parse(String(init.body ?? '{}'));
 const posts = (path: string) => fetchMock.mock.calls.filter(([u, i]) => String(u).endsWith(path) && (i as RequestInit | undefined)?.method === 'POST');
 
 const PEOPLE = [
-  { id: 'u-asha', ref_code: 'P01', name: 'Asha Rao', job_title: 'Principal', manager_id: null, employment_state: 'Active', login_state: 'Enabled' },
-  { id: 'u-vikram', ref_code: 'P02', name: 'Vikram Nair', job_title: 'Project architect', manager_id: 'u-asha', employment_state: 'Active', login_state: 'Enabled' },
+  { id: 'u-asha', ref_code: 'P01', name: 'Asha Rao', job_title: 'Principal', manager_id: null, employment_state: 'Active', login_state: 'Enabled', sets: ['principal'], can_be_pm: true, can_be_principal: true },
+  { id: 'u-vikram', ref_code: 'P02', name: 'Vikram Nair', job_title: 'Project architect', manager_id: 'u-asha', employment_state: 'Active', login_state: 'Enabled', sets: ['pm'], can_be_pm: true, can_be_principal: false },
 ];
 const CLIENTS = [{ id: 'c-lake', name: 'Lakeview Trust' }];
 
@@ -28,7 +28,7 @@ const withDirectory = (extra: Handler): Handler => (url, init) => {
   const hit = extra(url, init);
   if (hit) return hit;
   if (url.endsWith('/clients') && (init.method ?? 'GET') === 'GET') return list(CLIENTS);
-  if (url.endsWith('/people')) return list(PEOPLE);
+  if (url.endsWith('/project-candidates')) return list(PEOPLE);
   return undefined;
 };
 
@@ -114,6 +114,7 @@ describe('Create project sheet, live mode', () => {
     await fillProjectStep(sheet, { client: 'Lakeview Trust' });
     await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
     await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '600000');
     await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
     await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
     expect(await within(sheet).findByText('You need projects.create for this.')).toBeInTheDocument();
@@ -131,6 +132,7 @@ describe('Create project sheet, live mode', () => {
     await fillProjectStep(sheet, { client: 'Lakeview Trust' });
     await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
     await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '600000');
     await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
     await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
     expect(await within(sheet).findByText('Project PRJ-07 already exists.')).toBeInTheDocument();

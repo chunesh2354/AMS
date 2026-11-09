@@ -23,11 +23,12 @@ import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { GoTo } from '../shared/go-to';
 import { AccountsSettings } from './accounts';
+import { ApprovalsSettings } from './approvals-settings';
 import { RatesSettings } from './rates';
 
 const SECTIONS = [
   { key: 'profile', label: 'Profile' }, { key: 'permissions', label: 'Permissions' }, { key: 'accounts', label: 'Accounts' }, { key: 'rates', label: 'Rates' }, { key: 'calendars', label: 'Calendars' }, { key: 'work-categories', label: 'Work categories' },
-  { key: 'templates', label: 'Templates' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
+  { key: 'templates', label: 'Templates' }, { key: 'approvals', label: 'Approvals' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
 ];
 
 /**
@@ -37,7 +38,9 @@ const SECTIONS = [
 export function settingsSectionsFor(viewer: Viewer) {
   const full = canUseSettings(viewer);
   const rates = canSeeRates(viewer);
-  return SECTIONS.filter((s) => (s.key === 'rates' ? rates : full));
+  // Approvals saves through PUT /firm/approvals-settings, which needs firm.settings.manage firm-wide (operations only by grant).
+  const approvals = isLive ? viewer.capabilities?.['firm.settings.manage'] === 'firm' : full;
+  return SECTIONS.filter((s) => (s.key === 'rates' ? rates : s.key === 'approvals' ? approvals : full));
 }
 
 function Profile() {
@@ -201,7 +204,8 @@ export function SettingsScreen() {
         {section === 'imports' && <Imports />}
         {section === 'accounts' && <AccountsSettings />}
         {section === 'rates' && <RatesSettings />}
-        {!['profile', 'integrations', 'imports', 'accounts', 'rates'].includes(section) && <ListSection section={section} title={known.label} />}
+        {section === 'approvals' && <ApprovalsSettings />}
+        {!['profile', 'integrations', 'imports', 'accounts', 'rates', 'approvals'].includes(section) && <ListSection section={section} title={known.label} />}
       </SettingsLayout>
     </>
   );

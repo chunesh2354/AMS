@@ -7,7 +7,9 @@ Requires=postgresql.service
 [Service]
 User=ams
 Group=ams
-WorkingDirectory=/opt/ams/apps/api
+# The release directory is owned by root (copied there by ams-deploy): the service, running as ams, cannot change
+# its own code. ProtectSystem=strict makes it read-only as well; the API writes nothing to disk (tsx caches in /tmp).
+WorkingDirectory=/opt/ams/app/apps/api
 EnvironmentFile=/etc/ams/env
 ExecStart=/usr/bin/node --import tsx src/main.ts
 Restart=always
@@ -16,7 +18,6 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-ReadWritePaths=/opt/ams/apps/api
 MemoryMax=900M
 
 [Install]

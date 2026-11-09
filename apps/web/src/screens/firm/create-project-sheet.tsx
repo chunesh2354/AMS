@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
-import { createClient, createWizardProject, listClients, listDirectory, splitFee, whoAmI, type Client, type DirectoryPerson, type FeeBasis, type WizardProject } from '../../api/live/setup';
+import { createClient, createWizardProject, listClients, listProjectCandidates, splitFee, whoAmI, type CandidatePerson, type Client, type FeeBasis, type WizardProject } from '../../api/live/setup';
 import type { Person, Proposal } from '../../api';
 import { SETTINGS_LISTS } from '../../mock/studio-meridian';
 import { AvatarGroup } from '../../ui/Avatar';
@@ -171,7 +171,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
   const [serverError, setServerError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<{ code?: string; newClient?: string }>({});
   const [clients, setClients] = useState<Client[] | null>(null);
-  const [people, setPeople] = useState<DirectoryPerson[] | null>(null);
+  const [people, setPeople] = useState<CandidatePerson[] | null>(null);
   const [me, setMe] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(false);
@@ -182,13 +182,14 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
     if (!open) return;
     let live = true;
     setLoadError(null);
-    Promise.all([listClients(), listDirectory()]).then(
+    Promise.all([listClients(), listProjectCandidates()]).then(
       ([c, p]) => { if (live) { setClients(c); setPeople(p); } },
       (e) => { if (live) setLoadError(failureMessage(e)); },
     );
     // The creating principal is the default principal. Anyone else leaves it to the server: the firm's first principal.
     whoAmI().then(
-      (m) => { if (live && m.principal) { setMe(m.id); setForm((f) => (f.principal ? f : { ...f, principal: m.id })); } },
+      (m) => { if (live && m.principal) { setMe(m.id); setForm((f) => (f.principal || f.pm === m.id ? f : { ...f, principal: m.id })); } },
+
       () => {},
     );
     return () => { live = false; };
@@ -198,6 +199,8 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
     setForm((f) => ({ ...f, [k]: v }));
     if (k === 'code' || k === 'newClient') setFieldError((e) => ({ ...e, [k]: undefined }));
   };
+  // The PM's own time goes to the principal, so the principal is never the PM.
+  const setPm = (id: string | null) => setForm((f) => ({ ...f, pm: id, principal: f.principal && f.principal === id ? null : f.principal }));
   const addingClient = form.client === NEW_CLIENT;
   const template = LIVE_TEMPLATES.find((t) => t.name === form.template) ?? null;
   const phaseList: { code: string; name: string; budget_hours?: number }[] = proposal
@@ -221,6 +224,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
     : step === 1
       ? {
         template: !proposal && !template ? 'Choose a template' : undefined,
+        fee: fixed && !(form.fee != null && form.fee > 0) ? 'Enter the contracted fee' : undefined,
         phaseFees: fixed && form.fee != null && phaseList.length
           ? feesMissing ? 'Enter a fee for every phase'
             : paise(feeSum) !== paise(form.fee) ? `Phase fees add up to ${formatINR(feeSum)}. They must add up to the fee of ${formatINR(form.fee)}.` : undefined
@@ -290,12 +294,15 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
   };
 
   const active = (people ?? []).filter((p) => p.employment_state === 'Active' && p.login_state !== 'Revoked');
-  const managers = active.map((p) => ({ id: p.id, name: p.name, title: p.job_title ?? undefined }));
+  const asOption = (p: CandidatePerson) => ({ id: p.id, name: p.name, title: p.job_title ?? undefined });
+  // Only people the server accepts: a PM holds the pm or principal set, a principal the principal set (and is not the PM).
+  const managers = active.filter((p) => p.can_be_pm).map(asOption);
+  const principals = active.filter((p) => p.can_be_principal && p.id !== form.pm).map(asOption);
   const teamOptions = active.filter((p) => p.id !== form.pm).map((p) => ({ value: p.id, label: p.name }));
   const clientOptions = [...(clients ?? []).map((c) => ({ value: c.id, label: c.name })), { value: NEW_CLIENT, label: 'Add a new client' }];
   const dirty = step > 0 || !!form.code || !!form.pm || !!form.client;
   const basis = FEE_BASES.find((b) => b.value === form.basis);
-  const principalLabel = form.principal ? nameOf(form.principal) : 'The firm’s first principal';
+  const principalLabel = form.principal ? nameOf(form.principal) : 'Another principal of the firm, if there is one';
   const feeText = fixed ? (form.fee != null ? formatINR(form.fee) : 'Not set')
     : form.basis === 'percent_construction' ? (pct != null ? `${pct}% of construction cost` : 'Not set')
       : form.basis === 'hourly_nte' ? (form.cap != null ? `Up to ${formatINR(form.cap)}` : 'Not set') : 'Approved time at bill rates';
@@ -321,7 +328,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
             <TextField label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} error={err('name')} />
             <Select label="Client" options={clientOptions} value={form.client} onChange={(v) => set('client', v)} error={err('client')} placeholder={clients ? 'Select' : 'Loading clients'} />
             {addingClient && <TextField label="New client name" value={form.newClient} onChange={(e) => set('newClient', e.target.value)} error={err('newClient')} helper="Saved when the project is created." />}
-            <PersonPicker label="Project manager" people={managers} value={form.pm} onChange={(id) => set('pm', id)} error={err('pm')} />
+            <PersonPicker label="Project manager" people={managers} value={form.pm} onChange={setPm} error={err('pm')} helper="A project manager or a principal." />
           </FormSection>
         )}
         {step === 1 && (
@@ -331,8 +338,8 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
                 ? <p className="t-body-sm"><span className="t-numeric">{proposal.phases.length}</span> phases come from the accepted proposal.</p>
                 : <Select label="Phase template" options={LIVE_TEMPLATES.map((t) => ({ value: t.name, label: t.name }))} value={form.template} onChange={pickTemplate} error={err('template')} />}
               <Select label="Fee basis" options={FEE_BASES.map((b) => ({ value: b.value, label: b.label }))} value={form.basis} onChange={(v) => setForm((f) => ({ ...f, basis: v as FeeBasis }))} helper={basis?.helper} />
-              {fixed && <MoneyField label="Contracted fee" value={form.fee} onChange={(v) => setForm((f) => ({ ...f, fee: v, phaseFees: null }))} helper="Optional, can be set later. Nothing on a fixed fee is billable until it is set." />}
-              {form.basis === 'percent_construction' && <PercentField label="Fee percent" value={form.feePercent} onChange={(e) => set('feePercent', e.target.value)} error={err('feePercent')} helper="Optional, can be set later." />}
+              {fixed && <MoneyField label="Contracted fee" value={form.fee} onChange={(v) => setForm((f) => ({ ...f, fee: v, phaseFees: null }))} error={err('fee')} helper="Split across the phases below. A principal authorizes progress against each phase’s fee." />}
+              {form.basis === 'percent_construction' && <PercentField label="Fee percent" value={form.feePercent} onChange={(e) => set('feePercent', e.target.value)} error={err('feePercent')} helper="Optional. Milestones are billed as a principal authorizes them." />}
               {form.basis === 'hourly_nte' && <MoneyField label="Cap" value={form.cap} onChange={(v) => set('cap', v)} error={err('cap')} helper="Hourly work is billed up to this amount." />}
             </FormSection>
             {phaseList.length > 0 && (fixed && form.fee != null
@@ -353,7 +360,8 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
         {step === 2 && (
           <FormSection title="Team">
             <MultiSelect label="Team" helper="Team members can see the project and log time on it. The PM is on the team already." options={teamOptions} value={form.team} onChange={(v) => set('team', v)} />
-            <PersonPicker label="Principal" people={managers} value={form.principal} onChange={(id) => set('principal', id)} helper={me ? 'Approves the PM’s own time. You by default.' : 'Approves the PM’s own time. Left empty, the firm’s first principal.'} />
+            <PersonPicker label="Principal" people={principals} value={form.principal} onChange={(id) => set('principal', id)} helper={me && me !== form.pm ? 'Approves the PM’s own time. You by default.' : 'Approves the PM’s own time. Left empty, another principal of the firm.'} />
+
           </FormSection>
         )}
         {step === 2 && (

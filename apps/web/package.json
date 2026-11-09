@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:live": "vite --mode live",
     "build": "tsc --noEmit && vite build",
-    "build:live": "vite build --mode live --outDir dist-live",
+    "build:live": "vite build --mode live --outDir dist-live.next --emptyOutDir && node -e \"const f=require('fs');f.rmSync('dist-live.prev',{recursive:true,force:true});if(f.existsSync('dist-live'))f.renameSync('dist-live','dist-live.prev');f.renameSync('dist-live.next','dist-live')\"",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && node scripts/check-colors.mjs",

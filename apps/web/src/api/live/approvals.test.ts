@@ -81,3 +81,11 @@ describe('helpers', () => {
     ]);
   });
 });
+
+describe('self-approval', () => {
+  it("marks a sole principal's own work, and only that", () => {
+    expect(mapApproval({ ...timeItem, self_approval: true }).selfApproval).toBe(true);
+    expect(mapApproval({ ...timeItem, self_approval: false }).selfApproval).toBe(false);
+    expect(mapApproval(timeItem).selfApproval).toBe(false);
+  });
+});

@@ -31,15 +31,22 @@ export async function readyFor(tx: Tx, projectId: string, cutoff: string, onlyEn
   const exceptions: Exception[] = [];
   const missing: { type: string; record_id: string; message: string }[] = [];
 
+  // The claim is cumulative: the highest authorized level less net billing in drafts that were not rejected. So an
+  // amount released into a draft that was later rejected is ready again, even when a newer level is already drafted.
+  // The line cites the highest authorization not held by a live draft (each one backs at most one live line).
   const fixed = (await tx.query(
     `select a.id, a.amount, a.phase_id, ph.name as phase, c.id as component_id, c.name as component, c.billing_method,
-       f.id as auth_id, f.cumulative_percent
-     from fee_authorization f join phase_fee_allocation a on a.id = f.phase_fee_allocation_id join fee_component c on c.id = a.fee_component_id join phase ph on ph.id = a.phase_id
-     where c.project_id = $1 and c.billing_method in ('fixed_percent','fixed_milestone')
-       and f.cumulative_percent = (select max(x.cumulative_percent) from fee_authorization x where x.phase_fee_allocation_id = a.id)
-       and not exists (select 1 from source_allocation s where s.source_type = 'percent_claim' and s.source_id = f.id and s.active)`, [projectId],
+       (select max(x.cumulative_percent) from fee_authorization x where x.phase_fee_allocation_id = a.id) as cumulative_percent,
+       (select f.id from fee_authorization f where f.phase_fee_allocation_id = a.id
+          and not exists (select 1 from source_allocation s where s.source_type = 'percent_claim' and s.source_id = f.id and s.active)
+        order by f.cumulative_percent desc limit 1) as auth_id
+     from phase_fee_allocation a join fee_component c on c.id = a.fee_component_id join phase ph on ph.id = a.phase_id
+     where c.project_id = $1 and c.billing_method = 'fixed_percent'
+       and exists (select 1 from fee_authorization x where x.phase_fee_allocation_id = a.id) order by ph.sort_order`, [projectId],
   )).rows;
   for (const r of fixed) {
+    if (!r.auth_id) continue;
+
     const prior = toPaise((await tx.query(
       `select coalesce(sum(l.current_claim),0) v from billing_line l join billing_draft d on d.id = l.billing_draft_id
        where l.phase_id = $1 and l.fee_component_id = $2 and l.line_type = 'fixed_progress' and d.approval_state <> 'Rejected'`, [r.phase_id, r.component_id],

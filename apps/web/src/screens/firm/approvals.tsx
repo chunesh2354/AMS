@@ -3,8 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import { getApprovals, getPeople, type Approval, type ApprovalType } from '../../api';
 import { useResource } from '../../api/useResource';
 import { failureMessage, isLive } from '../../api/live';
-import { approveOne, batchApprove, batchMessage, delegateOne, liveApprovals, liveDelegates, returnOne, type DelegateOption } from '../../api/live/approvals';
-import { ApprovalRow } from '../../ui/ApprovalRow';
+import { approveOne, batchApprove, batchMessage, delegateOne, liveApprovals, liveDelegates, returnOne, type ApprovalItem, type DelegateOption } from '../../api/live/approvals';
+import { todayIn } from '../../api/live/time';
+import { useSession } from '../../app/session';
+import { ApprovalRow, SELF_APPROVED_LABEL } from '../../ui/ApprovalRow';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox';
 import { DateRangeField, type DateRange } from '../../ui/DateRangeField';
@@ -26,16 +28,19 @@ const loadDelegates = async (): Promise<DelegateOption[]> =>
 
 const QUEUES: ('All' | ApprovalType)[] = ['All', 'Time', 'Leave', 'Expenses', 'Bills', 'Changes', 'Billing drafts'];
 
+/** The studio's today: the first day a delegation can start (never a date baked into the build). */
+export const delegateStart = (timeZone?: string, now: Date = new Date()) => todayIn(timeZone, now);
+
 const amountLabel = (t: ApprovalType) => (t === 'Time' || t === 'Leave' || t === 'Changes' ? 'Hours' : 'Amount');
 
-type PreviewProps = { item: Approval | null; onApprove: (a: Approval) => void; onReturn: (a: Approval, reason: string) => void; onDelegate: (a: Approval) => void };
+type PreviewProps = { item: ApprovalItem | null; onApprove: (a: Approval) => void; onReturn: (a: Approval, reason: string) => void; onDelegate: (a: Approval) => void };
 
 function Preview(props: PreviewProps) {
   if (!props.item) return <PreviewPane state="empty" />;
   return <PreviewBody key={props.item.id} {...props} item={props.item} />;
 }
 
-function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & { item: Approval }) {
+function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & { item: ApprovalItem }) {
   const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState('');
   const [tried, setTried] = useState(false);
@@ -54,7 +59,12 @@ function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & {
         { label: 'Approver', value: item.approver },
         { label: 'Waiting', value: `${item.ageDays} d`, mono: true },
       ]}
-      alert={item.exception && <InlineAlert variant="danger" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}It is left out of bulk approval. Approve it here or return it with a note.</InlineAlert>}
+      alert={(item.selfApproval || item.exception) && (
+        <>
+          {item.selfApproval && <InlineAlert variant="info" title={SELF_APPROVED_LABEL}>Nobody else in the studio can approve this, so it is yours to approve and is recorded as a self-approval. Name a fallback approver in Settings, Approvals to change this.</InlineAlert>}
+          {item.exception && <InlineAlert variant="danger" title={`Exception: ${item.exception.toLowerCase()}`}>{isLive ? '' : 'Thursday has 12.50 h. '}It is left out of bulk approval. Approve it here or return it with a note.</InlineAlert>}
+        </>
+      )}
       evidence={item.evidence}
       history={item.history}
       actions={returning
@@ -73,7 +83,9 @@ function PreviewBody({ item, onApprove, onReturn, onDelegate }: PreviewProps & {
 
 export function ApprovalsScreen() {
   const [params, setParams] = useSearchParams();
-  const { state, data, retry } = useResource(isLive ? liveApprovals : getApprovals, []);
+  const { state, data, retry } = useResource<ApprovalItem[]>(isLive ? liveApprovals : getApprovals, []);
+  const { viewer } = useSession();
+  const today = delegateStart(viewer.firm?.timezone);
   const people = useResource(loadDelegates, []);
   const toast = useToast();
   const wide = useMediaQuery('(min-width: 1280px)');
@@ -210,7 +222,7 @@ export function ApprovalsScreen() {
               people={people.data ?? []}
               error={delegateTried && !delegate ? 'Choose a person' : undefined}
             />
-            <DateRangeField label="Dates" value={range} onChange={setRange} today="2026-11-06" min="2026-11-06" error={delegateTried && (!range.from || !range.to) ? 'Choose a start and end date' : undefined} />
+            <DateRangeField label="Dates" value={range} onChange={setRange} today={today} min={today} error={delegateTried && (!range.from || !range.to) ? 'Choose a start and end date' : undefined} />
           </FormSection>
         </Form>
       </Sheet>

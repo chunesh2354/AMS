@@ -8,7 +8,7 @@ email="${1:?usage: ams-create-platform-admin <email> <name>}"; shift
 name="${*:?usage: ams-create-platform-admin <email> <name>}"
 set -a; . /etc/ams/env; set +a
 password=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)
-cd /opt/ams/apps/api
+cd /opt/ams/app/apps/api
 sudo -u ams -H env HOME=/home/ams NODE_ENV=production AMS_OWNER_URL="$AMS_OWNER_URL" PLATFORM_ADMIN_PASSWORD="$password" \
   node --import tsx src/dev/platform-admin.ts "$email" "$name" >/dev/null
 aws ssm put-parameter --region "$AWS_REGION" --name /ams/platform-admin-password --type SecureString --overwrite --value "$password" >/dev/null

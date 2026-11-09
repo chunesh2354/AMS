@@ -14,6 +14,8 @@ export type LiveApproval = {
   delegated_to_id: string | null;
   project: { code: string; name: string } | null;
   exception_flags: string[];
+  /** Routed back to its submitter: a sole principal approving their own work. Older servers omit it. */
+  self_approval?: boolean;
   age_days: number | string | null;
   period: { start: string; end: string } | null;
   hours: string | Restricted | null;
@@ -80,7 +82,13 @@ export function evidenceOf(a: LiveApproval): string[] {
   return out;
 }
 
-export function mapApproval(a: LiveApproval): Approval {
+/** Shown on a request routed back to its submitter, a sole principal: the server audits it as self_approval_override. */
+export const SELF_APPROVAL_LABEL = 'Self-approved: no other approver in the studio';
+
+/** An inbox item, plus whether it is a sole principal's own work. */
+export type ApprovalItem = Approval & { selfApproval?: boolean };
+
+export function mapApproval(a: LiveApproval): ApprovalItem {
   const age = a.age_days == null ? NaN : Number(a.age_days);
   return {
     id: a.id,
@@ -92,12 +100,13 @@ export function mapApproval(a: LiveApproval): Approval {
     ageDays: Number.isFinite(age) ? age : 0,
     approver: a.approver.name,
     exception: exceptionText(a.exception_flags),
+    selfApproval: !!a.self_approval,
     evidence: evidenceOf(a),
     history: historyOf(a.history),
   };
 }
 
-export async function liveApprovals(): Promise<Approval[]> {
+export async function liveApprovals(): Promise<ApprovalItem[]> {
   const res = await apiFetch<ListResponse<LiveApproval>>('/approvals');
   return res.data.map(mapApproval);
 }
@@ -126,3 +135,16 @@ export async function pendingApprovalCount(): Promise<number> {
   const res = await apiFetch<ListResponse<LiveApproval>>('/approvals?status=Pending&page_size=1');
   return Number(res.total) || 0;
 }
+
+/** GET /firm/approvals-settings: who approves when routing finds nobody else, and who may be named. */
+export type ApprovalSettingsPerson = { id: string; ref_code: string; name: string; job_title: string | null };
+export type LiveApprovalSettings = {
+  fallback_approver: ApprovalSettingsPerson | null;
+  /** False when the stored fallback has left or lost time.approve: routing skips them. */
+  fallback_approver_eligible: boolean | null;
+  allow_self_approval: boolean;
+  candidates: ApprovalSettingsPerson[];
+};
+export const getApprovalSettings = () => apiFetch<LiveApprovalSettings>('/firm/approvals-settings');
+export const saveFallbackApprover = (personId: string | null) =>
+  apiFetch<Omit<LiveApprovalSettings, 'candidates'> & { audit_event_id: string }>('/firm/approvals-settings', { method: 'PUT', body: { fallback_approver_id: personId } });

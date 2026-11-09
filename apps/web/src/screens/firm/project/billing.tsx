@@ -16,6 +16,13 @@ import { formatINR } from '../../../ui/format';
 import { GenerateDraftSheet, LiveGenerateDraftSheet } from '../generate-draft-sheet';
 import { GoTo } from '../../shared/go-to';
 import { FeeAuthorizationPanel } from './billing-authorize';
+import { ProjectFeesEditor } from './billing-fees';
+
+/** Who may change a fixed fee's amounts, by the server's rule for PUT /projects/:code/fees. */
+export function mayEditFees(viewer: Viewer, projectId: string | null) {
+  if (can(viewer, 'projects.create', { firmWide: true }) || can(viewer, 'changes.manage', { firmWide: true })) return true;
+  return viewer.capabilities?.['changes.manage'] === 'scoped' && !!projectId && !!viewer.ledProjects?.includes(projectId);
+}
 
 const noPeople = async (): Promise<Awaited<ReturnType<typeof getPeople>>> => [];
 
@@ -33,6 +40,7 @@ export function ProjectBillingScreen() {
   const { viewer } = useSession();
   const finance = hasFinanceAccess(viewer);
   const [reload, setReload] = useState(0);
+  const [feesVersion, setFeesVersion] = useState(0);
   const [denied, setDenied] = useState(false);
   // Live: GET /billing/ready and /billing/drafts for this project. A 403 shows the permission state, not sample rows.
   const guard = <T,>(p: Promise<T>) => p.catch((e: unknown) => { if (isForbidden(e)) setDenied(true); throw e; });
@@ -92,7 +100,9 @@ export function ProjectBillingScreen() {
               ))}
             </div>
           )}
-      {isLive && <FeeAuthorizationPanel code={id} showMoney={showMoney} mayPrepare={showMoney} onChanged={() => setReload((r) => r + 1)} />}
+      {isLive && <ProjectFeesEditor code={id} mayEdit={mayEditFees(viewer, projectId)} onSaved={() => { setFeesVersion((v) => v + 1); setReload((r) => r + 1); }} />}
+      {isLive && <FeeAuthorizationPanel key={feesVersion} code={id} showMoney={showMoney} mayPrepare={showMoney} onChanged={() => setReload((r) => r + 1)} />}
+
       <div className="two-pane">
         <div className="stack-4">
           <div className="toolbar toolbar--between"><h3 className="t-h3">Ready to bill</h3>{generate}</div>

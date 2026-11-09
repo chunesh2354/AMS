@@ -14,9 +14,9 @@ you provisioned with: every command below takes `--profile` and `--region`.
 | --- | --- | --- |
 | `provision.sh` | your computer | Creates (or reuses) the backup bucket, the `ams-alerts` SNS topic with an email subscription for `ALERT_EMAIL`, the server IAM role, the `ams-web` security group (80/443 only), the `ams-staging` instance and its Elastic IP, and puts the topic ARN in the server's `/etc/ams/env`. Safe to rerun; rerunning also updates the role policy. |
 | `server-setup.sh` | server, as root (EC2 user data on first boot) | Swap, packages, Node 22, Caddy, AWS CLI, the `ams` user, `/etc/ams/env` with generated secrets (and `AMS_ALERT_TOPIC_ARN`), the database, then `install-server-files.sh` and a first deploy. Safe to rerun. |
-| `install-server-files.sh` | server, as root (called by `server-setup.sh` and by every `ams-deploy`) | Installs the `ams-*` commands, `/etc/cron.d/ams-backup` (with a `PATH` that includes `/usr/local/bin`), the systemd unit (then `daemon-reload`) and the Caddyfile (checked with `caddy validate` first; Caddy reloads only if it changed, and the previous file is put back if the reload fails). |
-| `deploy.sh` | server (`ams-deploy`) | Pulls `AMS_BRANCH` (and continues with the new `deploy.sh` if it changed), runs `install-server-files.sh`, installs, builds the web app in live mode, restarts the API, waits for `/api/v1/health`. A failed health check sends an alert. |
-| `deploy-remote.ps1` | your computer (Windows) | Runs `ams-deploy` on the server through `aws ssm send-command` and prints the result. On a server whose `ams-deploy` predates `install-server-files.sh`, it also runs that script once after the deploy. |
+| `install-server-files.sh` | server, as root (called by `server-setup.sh` and by every `ams-deploy`, from the root-owned copy in `/usr/local/lib/ams`) | Refuses a source that is not root-owned or is group/other-writable, then installs the `ams-*` commands, `/etc/cron.d/ams-backup` (with a `PATH` that includes `/usr/local/bin`), the systemd unit (then `daemon-reload`) and the Caddyfile (checked with `caddy validate` first; Caddy reloads only if it changed, and the previous file is put back if the reload fails). |
+| `deploy.sh` | server (`ams-deploy`) | Fetches `AMS_BRANCH` as root into `/opt/ams/src`, copies `infra/aws` to `/usr/local/lib/ams` and continues from there, runs `install-server-files.sh`, installs and builds as `ams` in `/opt/ams/build`, dumps the database, swaps the new API release and web build in (previous kept as `*.prev`), restarts the API and waits for `/api/v1/health`; rolls back if it is not healthy. Any failed step sends an alert naming the step. |
+| `deploy-remote.ps1` | your computer (Windows) | Runs `ams-deploy` on the server through `aws ssm send-command` and prints the result. |
 | `backup.sh` | server (`ams-backup`, cron 02:30 UTC) | `pg_dump` to `s3://<bucket>/db/ams-<UTC time>.dump`. On failure: exits non-zero, logs to the system log under the tag `ams-backup` and sends an alert. |
 | `restore.sh` | server (`ams-restore`) | Restores a named dump from S3 into a temporary database, then swaps it in. Dry run unless given `--yes-replace-database`; always takes a safety dump first. |
 | `alert.sh` | server (`ams-alert`) | Publishes a message to the `ams-alerts` topic (`AMS_ALERT_TOPIC_ARN` in `/etc/ams/env`) and logs it under the tag `ams-alert`. |
@@ -71,27 +71,80 @@ It finds the running instance tagged `Name=ams-staging` when no id is given, wai
 and exits non-zero unless the deploy succeeded. On the server itself: `sudo ams-deploy`.
 Migrations run when the API starts (`apps/api/src/main.ts`).
 
-Every deploy reinstalls the server's own files from the new checkout (`install-server-files.sh`): the
-`ams-*` commands, the backup cron file, the systemd unit (followed by `systemctl daemon-reload`) and the
-Caddyfile (validated with `caddy validate` before it replaces the live one; Caddy is reloaded only when it
-changed). So a fix to anything in `infra/aws` reaches an existing server with an ordinary deploy. If the
-new Caddyfile does not validate, the deploy stops before restarting the API and the live Caddyfile is
-left as it was.
+What `ams-deploy` does, in order:
 
-If the API does not answer `/api/v1/health` within 60 seconds of the restart, `ams-deploy` prints the
-last 40 log lines, sends an alert ("deploy FAILED: API not healthy") and exits non-zero.
+1. Takes a lock (`/run/ams-deploy.lock`): one deploy at a time.
+2. As root, fetches `AMS_BRANCH` into the root-owned checkout `/opt/ams/src` and copies `infra/aws` into
+   `/usr/local/lib/ams`, then continues with `/usr/local/lib/ams/deploy.sh` (so a changed `deploy.sh` takes
+   effect in the same deploy, and root only ever runs the root-owned copy).
+3. Reinstalls the server's own files (`install-server-files.sh`): the `ams-*` commands, the backup cron
+   file, the systemd unit (then `daemon-reload`) and the Caddyfile (validated with `caddy validate` first;
+   Caddy reloads only when it changed). A fix to anything in `infra/aws` reaches the server with an ordinary deploy.
+4. As `ams`: syncs `/opt/ams/src` into `/opt/ams/build`, runs `npm ci` for the API and the web app and
+   `npm run build:live` (which itself builds into `dist-live.next` and renames it into place).
+5. As root: copies the results into `/opt/ams/app.next` and `/opt/ams/web/dist-live.next` (root-owned).
+6. Dumps the database to `/var/backups/ams/pre-deploy-<UTC time>.dump` (the five newest are kept).
+7. Swaps the releases in with renames: `app` becomes `app.prev` and `app.next` becomes `app`; the same for
+   `web/dist-live` (previous kept as `web/dist-live.prev`). Caddy never serves an empty or half-built directory
+   (the vite build happens elsewhere, in `/opt/ams/build`); between the two renames the path is missing for
+   well under a millisecond, so a request landing exactly then can get one 404.
+8. Restarts the API (migrations run on start) and waits up to 60 seconds for `/api/v1/health`.
 
-### Existing servers (set up before install-server-files.sh)
+If any step fails, it exits non-zero and sends an alert, "deploy FAILED (<step>)". Before step 7 nothing
+the site uses has changed. From step 7 on, a failure or an unhealthy API triggers a **rollback**:
+`app.prev` and `web/dist-live.prev` are put back, `/opt/ams/src` goes back to the previous commit, the API
+restarts, and the alert ("deploy FAILED and rolled back") says whether the previous release came back
+healthy, with the last 40 log lines in the deploy output. The failed release is kept in
+`/opt/ams/app.failed` and `/opt/ams/web/dist-live.failed`. The server files installed in step 3 (commands,
+unit, Caddyfile) are not rolled back.
 
-Their `/usr/local/bin/ams-deploy` is the old one and does not reinstall anything. `deploy-remote.ps1`
-handles this by itself: after `ams-deploy` it runs `install-server-files.sh` once when the installed
-`ams-deploy` does not mention it. On the server by hand, the same thing is:
+Migrations and rollback: each migration file runs in its own transaction, so a migration that fails
+leaves the schema exactly as it was and rolling the code back is enough. If the migrations **succeeded**
+and the app still failed, the old code now runs on the new schema (usually fine: migrations are
+additive). If it is not fine, the deploy output and the alert print the commands that put the pre-deploy
+dump back: stop the API, rename the database aside (`<db>_failed_deploy_<time>`), create an empty one,
+`pg_restore` the dump into it, start the API. Nothing is restored automatically: a restore throws away
+whatever was written since the dump.
 
-```bash
-sudo ams-deploy && sudo bash /opt/ams/infra/aws/install-server-files.sh
-```
+To go back to the previous release by hand (as root): `mv /opt/ams/app /opt/ams/app.bad && mv
+/opt/ams/app.prev /opt/ams/app`, the same for `/opt/ams/web/dist-live`, then `systemctl restart ams-api`.
 
-Then rerun `provision.sh` (with `ALERT_EMAIL`) from your computer: it creates the topic, grants the
+### Who can change what (trust boundary)
+
+The API runs as the unprivileged `ams` user; deploys, backups and restores run as root. The rule is that
+**root never executes a file that `ams` can modify**, so a compromised API process (or a malicious npm
+package running its install script as `ams`) cannot turn itself into root.
+
+| Path | Owner | Written by | Executed by |
+| --- | --- | --- | --- |
+| `/opt/ams/src` | root | `git fetch`/`checkout` as root | nobody directly; the source of the copies below |
+| `/usr/local/lib/ams` | root | `ams-deploy` (copy of `src/infra/aws`) | root (`deploy.sh`, `install-server-files.sh`) |
+| `/usr/local/bin/ams-*`, `/etc/cron.d/ams-backup`, the unit, the Caddyfile | root | `install-server-files.sh` | root (deploy, cron backup, restore) |
+| `/opt/ams/build` | ams | `rsync`, `npm ci`, `vite build`, as `ams` | `ams` only; root only copies files out of it |
+| `/opt/ams/app` (and `.prev`) | root | `ams-deploy` (copy) | the API, as `ams`, read-only to it (also `ProtectSystem=strict`) |
+| `/opt/ams/web/dist-live` (and `.prev`) | root | `ams-deploy` (copy) | nobody; Caddy serves it |
+| `/etc/ams/env` | root, group `ams`, mode 640 | `server-setup.sh`, `provision.sh` | sourced by the root scripts; read by the API |
+
+Root does read files in `/opt/ams/build` to copy them, with `rsync` copying symlinks as symlinks (never
+following them), skipping devices, dropping set-uid bits and group/other write, and setting owner `root`.
+That output is code that only ever runs as `ams`, so `ams` controlling it gives `ams` nothing new.
+`install-server-files.sh` refuses to install from a directory or file that is not root-owned or that
+group or others can write. `create-platform-admin.sh` and `set-platform-admin-password.sh` run the API's
+admin script as `ams`, from `/opt/ams/app`.
+
+### Existing servers (the legacy ams-owned `/opt/ams` checkout)
+
+Servers set up before this change have `/opt/ams` as a git checkout owned by `ams` and an
+`/usr/local/bin/ams-deploy` that hands over to the new `deploy.sh` inside it. The next ordinary deploy
+converts the server once: the old `ams-deploy` pulls and hands over (the last time root runs a file from the
+ams-owned checkout), and the new `deploy.sh` clones a fresh root-owned `/opt/ams/src`, copies the running API
+and web build into the new root-owned `/opt/ams/app` and `/opt/ams/web/dist-live` (so a rollback target
+exists), swaps the directories (the old checkout stays as `/opt/ams.legacy-<time>`: delete it once the
+deploy is healthy) and continues from `/usr/local/lib/ams`. The site keeps serving except for a second or
+two between the directory swap and the Caddy reload. `AMS_REPO` in `/etc/ams/env` (default
+`https://github.com/chunesh2354/AMS.git`) is where the fresh clone comes from.
+
+If the server has no `AMS_ALERT_TOPIC_ARN` yet, rerun `provision.sh` (with `ALERT_EMAIL`) from your computer: it creates the topic, grants the
 server `sns:Publish` on it and writes `AMS_ALERT_TOPIC_ARN` into the server's `/etc/ams/env` through
 SSM Run Command. If SSM cannot reach the server it prints the line to add by hand.
 
@@ -171,7 +224,7 @@ existed get them by rerunning `provision.sh`.
 - `provision.sh` creates the SNS topic `ams-alerts`, subscribes `ALERT_EMAIL` (the owner confirms the
   email from AWS), allows the server role `sns:Publish` on that topic only, and writes
   `AMS_ALERT_TOPIC_ARN` into `/etc/ams/env`.
-- Sent on: a failed nightly backup, a failed health check after `ams-deploy` restarts the API, a failed restore.
+- Sent on: a failed nightly backup, any failed `ams-deploy` step (naming the step), a deploy that was rolled back because the API was not healthy, a failed restore.
 - Send a test: `sudo ams-alert test "alert test"`.
 - Change the address: rerun `provision.sh` with the new `ALERT_EMAIL`, then remove the old subscription
   in the SNS console (or `aws sns unsubscribe --subscription-arn <arn>`).

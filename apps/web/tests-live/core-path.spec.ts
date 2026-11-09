@@ -107,7 +107,7 @@ const FINANCE_NAME = `Test Finance ${RUN}`;
 // The server's messages. For the only principal, the last-principal rule answers first (pinned in apps/api/test/accounts.test.ts).
 const REFUSALS: [string, string][] = [
   ['Asha Rao', 'The last principal cannot lose principal or access until another is assigned.'],
-  [FINANCE_NAME, 'Only a principal can deactivate a principal or finance account.'],
+  [FINANCE_NAME, 'Only a principal can deactivate a principal, finance or other sensitive account.'],
 ];
 
 async function addAccount(page: Page, name: string, email: string, types: { check?: RegExp[]; uncheck?: RegExp[] } = {}) {

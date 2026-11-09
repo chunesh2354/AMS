@@ -10,6 +10,6 @@ email="${1:?usage: ams-set-platform-admin-password <email> <name>}"; shift
 name="${*:?usage: ams-set-platform-admin-password <email> <name>}"
 set -a; . /etc/ams/env; set +a
 password=$(aws ssm get-parameter --region "$AWS_REGION" --name /ams/platform-admin-password --with-decryption --query Parameter.Value --output text)
-cd /opt/ams/apps/api
+cd /opt/ams/app/apps/api
 sudo -u ams -H env HOME=/home/ams NODE_ENV=production AMS_OWNER_URL="$AMS_OWNER_URL" PLATFORM_ADMIN_PASSWORD="$password" \
   node --import tsx src/dev/platform-admin.ts "$email" "$name"
