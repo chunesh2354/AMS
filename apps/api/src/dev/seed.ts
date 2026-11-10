@@ -201,6 +201,31 @@ export async function seed(ownerConn: string, opts: { today?: string } = {}) {
     const l2 = await ins('billing_line', { billing_draft_id: approved.id, phase_id: ph2.SD.id, fee_component_id: feePct.id, line_type: 'recharge', label: 'Structural consultant recharge, SC-2041', calculation_basis: JSON.stringify({ bill: '250000.00', markup_percent: '10.00', invoice_no: 'SC-2041' }), current_claim: 275000 });
     await ins('source_allocation', { billing_line_id: l2.id, source_type: 'supplier_bill', source_id: bill.id, amount_claimed: 275000 });
 
+    // Leave (migration 008). The studio's types (the defaults every firm gets), Rohan's balances as My leave shows them
+    // (12 earned, 4 casual, 6 sick left), the approved leave in the mock, and the two leave requests waiting on Meera Iyer
+    // in the approvals mock: Karan Bhat on 20 Nov and Sneha Pillai on 04 to 05 Dec.
+    const lt: Record<string, Row> = {};
+    const leaveTypes: [string, string, number, boolean][] = [['earned', 'Earned leave', 15, true], ['sick', 'Sick leave', 7, true], ['casual', 'Casual leave', 7, true], ['unpaid', 'Unpaid leave', 0, false]];
+    for (const [i, [key, name, allowance, tracks]] of leaveTypes.entries()) lt[key] = await ins('leave_type', { key, name, yearly_allowance_days: allowance, tracks_balance: tracks, sort_order: i });
+    const entitlement = (ref: string, key: string, allowance: number, taken: number) => ins('leave_entitlement', { person_id: P[ref], leave_type_id: lt[key].id, year: 2026, allowance_days: allowance, taken_days: taken });
+    await entitlement('P04', 'earned', 14, 2);
+    await entitlement('P04', 'casual', 4, 0);
+    await entitlement('P04', 'sick', 6, 0);
+    await entitlement('P05', 'earned', 15, 0.5);
+    const leave = (ref: string, key: string, start: string, end: string, days: number, status: string, approver: string, half = false) => ins('leave_request', {
+      person_id: P[ref], leave_type_id: lt[key].id, start_date: start, end_date: end, half_day: half, days, status, approver_id: P[approver], decided_at: status === 'Pending' ? null : new Date(),
+    });
+    await leave('P04', 'earned', '2026-11-16', '2026-11-17', 2, 'Approved', 'P02');
+    await leave('P05', 'earned', '2026-11-18', '2026-11-18', 0.5, 'Approved', 'P02', true);
+    const pendingLeave = async (ref: string, start: string, end: string, days: number, waited: number) => {
+      const l = await leave(ref, 'earned', start, end, days, 'Pending', 'P03');
+      const ar = await ins('approval_request', { type: 'leave', record_type: 'leave_request', record_id: l.id, submitter_id: P[ref], approver_id: P.P03, created_at: `${addDays(today, -waited)}T09:00:00+05:30` });
+      await db.query('update leave_request set approval_request_id = $2 where id = $1', [l.id, ar.id]);
+    };
+    await pendingLeave('P06', '2026-11-20', '2026-11-20', 1, 3);
+    // 05 Dec 2026 is a Saturday, so the request counts one working day.
+    await pendingLeave('P07', '2026-12-04', '2026-12-05', 1, 2);
+
     await db.query('commit');
     return firmId as string;
   } catch (e) {

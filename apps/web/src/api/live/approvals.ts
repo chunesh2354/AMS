@@ -5,7 +5,7 @@ import { formatHours, formatINR, parseISO } from '../../ui/format';
 /** Shape of one item from GET /approvals (apps/api/src/modules/approvals.ts, view()). */
 export type LiveApproval = {
   id: string;
-  type: 'time' | 'internal_time' | 'billing_draft' | string;
+  type: 'time' | 'internal_time' | 'billing_draft' | 'leave' | string;
   status: string;
   record_type: string;
   record_id: string;
@@ -23,6 +23,8 @@ export type LiveApproval = {
   draft_no: string | null;
   lines: { id: string; service_date: string; duration_hours: string | Restricted | null; approval_state: string; note: string | null; correction_reason: string | null }[];
   history: { action: string; reason: string | null; at: string; actor: string }[];
+  /** Leave requests only (type 'leave'). Older servers omit it. */
+  leave?: { leave_type: { id: string; key: string; name: string }; start_date: string; end_date: string; half_day: boolean; days: string; reason: string | null; handover_note: string | null; status: string } | null;
 };
 
 /** Shape of one item from GET /people (apps/api/src/modules/auth.ts). */
@@ -37,6 +39,9 @@ const day = (iso: string) => { const d = parseISO(iso.slice(0, 10)); return { d:
 export function approvalTypeOf(t: string): ApprovalType {
   if (t === 'time' || t === 'internal_time') return 'Time';
   if (t === 'billing_draft') return 'Billing drafts';
+  if (t === 'leave') return 'Leave';
+  if (t === 'expense') return 'Expenses';
+  if (t === 'supplier_bill') return 'Bills';
   return 'Changes';
 }
 
@@ -44,6 +49,7 @@ export function approvalTypeOf(t: string): ApprovalType {
 export function periodText(p: LiveApproval['period'], draftNo: string | null): string {
   if (p) {
     const a = day(p.start), b = day(p.end);
+    if (p.start.slice(0, 10) === p.end.slice(0, 10)) return `${a.d} ${a.m}`;
     return a.m === b.m ? `${a.d} to ${b.d} ${b.m}` : `${a.d} ${a.m} to ${b.d} ${b.m}`;
   }
   return draftNo ? `Draft ${draftNo}` : NOT_RECORDED;
@@ -76,6 +82,11 @@ export function historyOf(h: LiveApproval['history']): Approval['history'] {
 
 export function evidenceOf(a: LiveApproval): string[] {
   if (a.type === 'billing_draft') return a.draft_no ? [`Billing draft ${a.draft_no}`] : [];
+  if (a.type === 'leave' && a.leave) {
+    const l = a.leave;
+    const days = Number(l.days);
+    return [`${l.leave_type.name}, ${days.toFixed(2)} ${days === 1 ? 'day' : 'days'}${l.half_day ? ' (half days)' : ''}`, ...(l.handover_note ? [`Handover: ${l.handover_note}`] : []), ...(l.reason ? [`Private reason: ${l.reason}`] : [])];
+  }
   const out: string[] = [];
   if (a.period) { const s = day(a.period.start); out.push(`Timesheet, week of ${s.d} ${s.m}`); }
   if (a.lines?.length) out.push(`${a.lines.length} time ${a.lines.length === 1 ? 'entry' : 'entries'}`);
@@ -94,7 +105,7 @@ export function mapApproval(a: LiveApproval): ApprovalItem {
     id: a.id,
     type: approvalTypeOf(a.type),
     submitter: a.submitter.name,
-    project: a.project ? a.project.code : a.type === 'internal_time' ? 'Internal time' : NOT_RECORDED,
+    project: a.project ? a.project.code : a.type === 'internal_time' ? 'Internal time' : a.type === 'leave' && a.leave ? a.leave.leave_type.name : NOT_RECORDED,
     period: periodText(a.period, a.draft_no),
     amount: amountText(a),
     ageDays: Number.isFinite(age) ? age : 0,
@@ -123,6 +134,14 @@ export async function liveDelegates(): Promise<DelegateOption[]> {
 export const approveOne = (id: string) => apiFetch<{ status: string }>(`/approvals/${id}/approve`, { method: 'POST', body: {} });
 export const returnOne = (id: string, reason: string) => apiFetch<{ status: string }>(`/approvals/${id}/return`, { body: { reason } });
 export const delegateOne = (id: string, to: string, until: string) => apiFetch<{ ok: boolean }>(`/approvals/${id}/delegate`, { body: { to, until } });
+export const rejectOne = (id: string, reason: string) => apiFetch<{ status: string }>(`/approvals/${id}/reject`, { body: { reason } });
+/** Sends a pending item to another eligible approver (needs the item's capability firm-wide, e.g. a principal). */
+export const reassignOne = (id: string, to: string, reason?: string) => apiFetch<{ ok: boolean; approver: { id: string; name: string } }>(`/approvals/${id}/reassign`, { body: { to, reason } });
+/** Pending items whose approver can no longer decide them, for someone who can reassign them. */
+export async function liveStuckApprovals(): Promise<(ApprovalItem & { reason: string })[]> {
+  const res = await apiFetch<ListResponse<LiveApproval & { reason: string }>>('/approvals/stuck');
+  return res.data.map((a) => ({ ...mapApproval(a), reason: a.reason }));
+}
 export const batchApprove = (ids: string[]) => apiFetch<{ approved: string[]; skipped: { id: string; reason: string }[] }>('/approvals/batch-approve', { body: { ids } });
 
 export function batchMessage(r: { approved: string[]; skipped: unknown[] }): string {

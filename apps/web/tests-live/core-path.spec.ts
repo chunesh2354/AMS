@@ -61,7 +61,7 @@ test('1. staff login, my time, edit persists, submit locks', async ({ page }) =>
 test('6. unconnected route shows sample banner; sign out requires login', async ({ page }) => {
   await login(page, 'p10');
   await expect(page).toHaveURL(/\/firm\/overview/);
-  await page.goto('/firm/people');
+  await page.goto('/firm/workload'); // People is connected now; Workload is still sample data
   await expect(page.getByText('Sample data. This screen is not connected to the database yet.')).toBeVisible();
   await shot(page, 'sample-banner');
   // The redesign puts Sign out at the foot of the side nav instead of in an account menu.

@@ -1,12 +1,15 @@
 import { useMemo } from 'react';
 import { useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import {
   canSeeRatesTab, getAvailability, getPeople, getPerson, getPersonActivity, getPersonLeave, getProjects, getRates, getWorkingPattern, personName, type Fenced, type LeaveRequest,
 } from '../../api';
 import { useResource } from '../../api/useResource';
-import { useSession } from '../../app/session';
+import { isLive } from '../../api/live';
+import { ACCOUNT_TYPES, accountTypeLabel } from '../../api/live/accounts';
+import { getProfile, type PersonProfile, type ProfileWeek } from '../../api/live/people';
+import { can, canSeeRates, useSession } from '../../app/session';
 import { WorkspaceColumns } from '../../layouts/WorkspaceColumns';
 import { ActivityFeed, type ActivityDay } from '../../ui/ActivityFeed';
 import { Avatar } from '../../ui/Avatar';
@@ -20,7 +23,9 @@ import { KpiTile } from '../../ui/KpiTile';
 import { ListStateBlock } from '../../ui/ListState';
 import { PageHeader } from '../../ui/PageHeader';
 import { StatusChip } from '../../ui/StatusChip';
+import type { Status } from '../../ui/status-colors';
 import { EditPersonSheet } from './person-sheets';
+import { HOURS_FENCE } from './people';
 
 const TABS = ['overview', 'access', 'projects', 'capacity', 'leave', 'rates', 'activity'] as const;
 type TabKey = (typeof TABS)[number];
@@ -114,7 +119,12 @@ function Projects({ codes }: { codes: string[] }) {
   return <DataTable label="Projects" columns={columns} rows={rows} rowKey={(p) => p.code} state={state} onRetry={retry} capability="view projects" empty={{ message: 'Not on a project yet.' }} />;
 }
 
+/** Live mode reads GET /people/:id/profile; mock mode keeps the sample studio's seven tabs, unchanged. */
 export function PersonScreen() {
+  return isLive ? <LivePersonScreen /> : <MockPersonScreen />;
+}
+
+function MockPersonScreen() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
   const { viewer } = useSession();
@@ -222,3 +232,151 @@ function AccessTab({ roles }: { roles: string[] }) {
   );
 }
 
+
+// ---------- Live mode ----------
+
+/**
+ * Capacity, Leave and Activity have no endpoint yet (no working schedule or leave tables in the core path), so
+ * live mode leaves those tabs out rather than showing sample data. Rates appear only for those who may read them.
+ */
+const LIVE_TABS = ['overview', 'access', 'projects', 'rates'] as const;
+type LiveTab = (typeof LIVE_TABS)[number];
+const ACCOUNTS_PATH = '/firm/settings/accounts';
+const fenced = <T,>(f: { restricted: true } | { restricted: false; value: T }) => (f.restricted ? RESTRICTED : f.value);
+
+function LivePersonScreen() {
+  const { id = '' } = useParams();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { viewer } = useSession();
+  const { state, data: person, retry } = useResource(() => getProfile(id), [id]);
+
+  const tabs = LIVE_TABS.filter((t) => t !== 'rates' || canSeeRates(viewer));
+  const requested = params.get('tab') as LiveTab | null;
+  const tab: LiveTab = requested && tabs.includes(requested) ? requested : 'overview';
+  const crumb = [{ label: 'People', to: '/firm/people' }, { label: person?.name ?? id }];
+
+  if (state === 'ready' && !person) {
+    return (
+      <>
+        <PageHeader title="Person" breadcrumb={[{ label: 'People', to: '/firm/people' }, { label: id }]} />
+        <div className="solid-panel"><EmptyState message="No one has that reference." action={<a href="/firm/people">Back to People</a>} /></div>
+      </>
+    );
+  }
+  if (state !== 'ready' || !person) {
+    return (
+      <>
+        <PageHeader title="Person" breadcrumb={crumb} />
+        <ListStateBlock state={state === 'ready' ? 'loading' : state} label="This person" onRetry={retry} capability="view people" />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title={person.name}
+        breadcrumb={crumb}
+        lead={<Avatar name={person.name} size={36} />}
+        subtitle={`${person.title} · Manager ${person.manager ?? 'None'}`}
+        meta={(
+          <>
+            <StatusChip size="sm" status={person.invitation as Status} label={`Invitation ${person.invitation.toLowerCase()}`} />
+            <StatusChip size="sm" status={person.employment as Status} label={`Employment ${person.employment.toLowerCase()}`} />
+            <StatusChip size="sm" status={person.login as Status} label={`Login ${person.login.toLowerCase()}`} />
+          </>
+        )}
+        secondaryActions={can(viewer, 'people.manage', { firmWide: true }) && <Button onClick={() => navigate(ACCOUNTS_PATH)}>Manage in Accounts</Button>}
+        tabs={tabs.map((t) => ({ label: cap(t), to: `?tab=${t}`, active: t === tab }))}
+      />
+      {tab === 'overview' && <LiveOverview person={person} />}
+      {tab === 'access' && <LiveAccess person={person} />}
+      {tab === 'projects' && <LiveProjects person={person} />}
+      {tab === 'rates' && <LiveRates person={person} />}
+    </>
+  );
+}
+
+function LiveOverview({ person }: { person: PersonProfile }) {
+  const time = person.time;
+  const weeks = time.restricted ? [] : time.value.weeks;
+  const now = weeks[weeks.length - 1];
+  const columns: Column<ProfileWeek>[] = [
+    { key: 'week', header: 'Week of', type: 'date', value: (w) => w.week },
+    { key: 'logged', header: 'Logged', type: 'hours', value: (w) => w.logged },
+    { key: 'approved', header: 'Approved', type: 'hours', value: (w) => w.approved },
+  ];
+  return (
+    <WorkspaceColumns
+      main={(
+        <>
+          <div className="grid-12">
+            <div className="span-4"><KpiTile label="Logged this week" value={now?.logged.toFixed(2)} unit="h" restricted={time.restricted} restrictedReason={HOURS_FENCE} /></div>
+            <div className="span-4"><KpiTile label="Projects" value={person.projects.length + person.hiddenProjects} /></div>
+            <div className="span-4"><KpiTile label="Approved this week" value={now?.approved.toFixed(2)} unit="h" restricted={time.restricted} restrictedReason={HOURS_FENCE} /></div>
+          </div>
+          {time.restricted
+            ? <ListStateBlock state="denied" label="Recent time" capability="view this person's time" />
+            : <DataTable label="Recent time" columns={columns} rows={weeks} rowKey={(w) => w.week} />}
+        </>
+      )}
+      side={(
+        <section className="card solid-panel" aria-labelledby="details">
+          <h2 id="details" className="t-h3">Details</h2>
+          <dl className="t-body-sm">
+            <dt className="ink-2">Reference</dt><dd className="t-numeric">{person.ref}</dd>
+            <dt className="ink-2">Work email</dt><dd>{person.email}</dd>
+            <dt className="ink-2">Job title</dt><dd>{person.title}</dd>
+            <dt className="ink-2">Manager</dt><dd>{person.manager ?? 'None'}</dd>
+          </dl>
+        </section>
+      )}
+    />
+  );
+}
+
+function LiveAccess({ person }: { person: PersonProfile }) {
+  type Row = { id: string; type: string; description: string };
+  const rows: Row[] = person.accountTypes.map((t) => ({ id: t, type: accountTypeLabel(t), description: ACCOUNT_TYPES.find((a) => a.value === t)?.description ?? '' }));
+  const columns: Column<Row>[] = [
+    { key: 'type', header: 'Account type', value: (r) => r.type },
+    { key: 'description', header: 'What it allows', value: (r) => r.description },
+  ];
+  return <DataTable label="Account types" columns={columns} rows={rows} rowKey={(r) => r.id} state={rows.length ? 'ready' : 'empty'} empty={{ message: 'No account type yet. Set one in Settings, Accounts.' }} />;
+}
+
+function LiveProjects({ person }: { person: PersonProfile }) {
+  type P = PersonProfile['projects'][number];
+  const columns: Column<P>[] = [
+    { key: 'code', header: 'Code', value: (p) => p.code, render: (p) => <span className="t-numeric">{p.code}</span> },
+    { key: 'name', header: 'Project', value: (p) => p.name },
+    { key: 'role', header: 'Role', value: (p) => (p.role === 'pm' ? 'Project manager' : cap(p.role)) },
+    { key: 'status', header: 'Status', type: 'status', value: (p) => p.status },
+  ];
+  return (
+    <>
+      <DataTable
+        label="Projects" columns={columns} rows={person.projects} rowKey={(p) => p.id} state={person.projects.length ? 'ready' : 'empty'}
+        empty={{ message: person.hiddenProjects ? 'Only on projects you cannot open.' : 'Not on a project yet.' }}
+      />
+      {person.hiddenProjects > 0 && person.projects.length > 0 && (
+        <p className="t-body-sm ink-2">Also on {person.hiddenProjects} {person.hiddenProjects === 1 ? 'project' : 'projects'} you cannot open.</p>
+      )}
+    </>
+  );
+}
+
+function LiveRates({ person }: { person: PersonProfile }) {
+  type Row = { id: string; kind: string; from: string | null; rate: unknown };
+  const rows: Row[] = [
+    { id: 'bill', kind: 'Bill rate (₹/h)', from: person.billRate.restricted ? null : person.billFrom, rate: fenced(person.billRate) },
+    { id: 'cost', kind: 'Cost rate (₹/h)', from: person.costRate.restricted ? null : person.costFrom, rate: fenced(person.costRate) },
+  ];
+  const columns: Column<Row>[] = [
+    { key: 'kind', header: 'Rate', value: (r) => r.kind },
+    { key: 'rate', header: 'Amount', type: 'money', value: (r) => r.rate },
+    { key: 'from', header: 'Effective from', type: 'date', value: (r) => r.from },
+  ];
+  return <DataTable label="Rates" columns={columns} rows={rows} rowKey={(r) => r.id} />;
+}

@@ -203,7 +203,10 @@ describe('the routed approver must hold the capability', () => {
     const s = await logAndSubmit(f, 'P05', '2026-09-07', { internal_category_id: await category(f) });
     expect(s.status).toBe(200);
     const rid = s.body.approval_request_ids[0];
-    expect(await approverOf(f, rid)).toBe(f.id('P04'));
+    // Routing now skips P04 (no time.approve) and sends it to the firm's fallback approver instead.
+    expect(await approverOf(f, rid)).toBe(f.id('P01'));
+    // An item routed before that fix can still sit with P04: the decision itself must still be refused.
+    await f.owner.query('update approval_request set approver_id = $2 where id = $1', [rid, f.id('P04')]);
 
     const a = await f.call('P04', 'POST', `/approvals/${rid}/approve`);
     expect(a.status).toBe(403);

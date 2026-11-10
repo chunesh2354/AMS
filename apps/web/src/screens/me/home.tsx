@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Clock, Play, Sun } from 'lucide-react';
 import { getMyDay, personName, type Task } from '../../api';
 import { useResource } from '../../api/useResource';
+import { isLive } from '../../api/live';
 import { useOverlays } from '../../app/overlays';
 import { useSession, useTimer } from '../../app/session';
 import { QueueDashboard } from '../../layouts/QueueDashboard';
@@ -16,11 +17,17 @@ import { Skeleton } from '../../ui/Skeleton';
 import { TaskRow } from '../../ui/TaskRow';
 import { formatDate, formatHours } from '../../ui/format';
 import { TaskSheet } from '../shared/task-sheet';
+import { LiveMyDayScreen } from './home-live';
 import { taskStatus } from '../shared/task-bits';
 
 const i = { size: 20, strokeWidth: 1.5, 'aria-hidden': true } as const;
 
+/** Live mode reads the API (see LiveMyDayScreen); mock mode is the sample studio, unchanged. */
 export function MyDayScreen() {
+  return isLive ? <LiveMyDayScreen /> : <MockMyDayScreen />;
+}
+
+function MockMyDayScreen() {
   const navigate = useNavigate();
   const { viewer } = useSession();
   const timer = useTimer();

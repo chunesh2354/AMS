@@ -358,7 +358,8 @@ export function billingRoutes(api: Api) {
     const principal = (await tx.query(
       `select g.person_id from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id where s.key = 'principal' and p.login_state = 'Enabled' and g.person_id <> $1 order by p.ref_code limit 1`, [actor.id],
     )).rows[0];
-    const approver = principal ? await routeApprover(tx, principal.person_id, actor.id) : actor.id;
+    // Only someone holding billing.approve, never the preparer unless they are the studio's sole principal (else 422 NO_APPROVER).
+    const approver = await routeApprover(tx, principal?.person_id ?? null, actor.id, { capability: 'billing.approve', projectId: d.project_id });
     const ar = (await tx.query(
       `insert into approval_request (firm_id, type, record_type, record_id, project_id, submitter_id, approver_id, created_by) values ($1,'billing_draft','billing_draft',$2,$3,$4,$5,$4) returning id`,
       [firmId, d.id, d.project_id, actor.id, approver],

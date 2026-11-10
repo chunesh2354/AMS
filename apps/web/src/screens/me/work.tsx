@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getMyTasks, personName, type Task, type TaskStage } from '../../api';
 import { useResource } from '../../api/useResource';
+import { isLive } from '../../api/live';
 import { useSession } from '../../app/session';
 import { TODAY } from '../../mock/studio-meridian';
 import { Button } from '../../ui/Button';
@@ -16,6 +17,7 @@ import { TextArea } from '../../ui/TextArea';
 import { useToast } from '../../ui/Toast';
 import { TaskCardBody, taskStatus } from '../shared/task-bits';
 import { TaskSheet } from '../shared/task-sheet';
+import { LiveMyWorkScreen } from './work-live';
 import { GoTo } from '../shared/go-to';
 
 const END_OF_WEEK = '2026-11-08';
@@ -23,7 +25,12 @@ const GROUPS = ['Overdue', 'Today', 'This week', 'Later'] as const;
 const groupOf = (t: Task) => (t.due < TODAY ? 'Overdue' : t.due === TODAY ? 'Today' : t.due <= END_OF_WEEK ? 'This week' : 'Later');
 const COLUMNS = ['Planned', 'Ready', 'In progress', 'Blocked', 'In review'];
 
+/** Live mode reads the API (see LiveMyWorkScreen); mock mode is the sample studio, unchanged. */
 export function MyWorkScreen() {
+  return isLive ? <LiveMyWorkScreen /> : <MockMyWorkScreen />;
+}
+
+function MockMyWorkScreen() {
   const { viewer } = useSession();
   const [params, setParams] = useSearchParams();
   const toast = useToast();

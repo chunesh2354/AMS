@@ -9,6 +9,7 @@ const LOGIN_PATH = '/login';
 
 /** Routes backed by the database in live mode. Every other route shows the sample data banner. */
 export const CONNECTED_ROUTES = [
+  '/firm/overview',
   '/firm/projects',
   '/firm/projects/:id',
   '/firm/projects/:id/phases',
@@ -18,8 +19,13 @@ export const CONNECTED_ROUTES = [
   '/firm/billing',
   '/firm/receivables',
   '/me/time',
+  '/me/leave',
+  '/me/home',
+  '/me/work',
   '/firm/settings/accounts',
   '/firm/settings/rates',
+  '/firm/people',
+  '/firm/people/:id',
 ] as const;
 
 export const SAMPLE_DATA_NOTICE = 'Sample data. This screen is not connected to the database yet.';
