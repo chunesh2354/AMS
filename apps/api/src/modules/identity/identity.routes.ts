@@ -170,10 +170,12 @@ export function authRoutes(api: Api, opts: { secureCookie?: boolean }) {
   });
 
   // Sensitive values are stored, and shown as restricted to anyone without the matching capability (AC-F17-2).
+  // The platform admin is not a person in the firm: its rows (no actor_id, action platform_*) show "Platform admin".
   get('/audit', async ({ tx, actor, query, req }) => {
     authorize(actor, 'audit.view');
     const rows = (await tx.query(
-      `select a.id, a.at, a.record_type, a.record_id, a.action, a.previous, a.new, a.reason, a.sensitive, p.name as actor
+      `select a.id, a.at, a.record_type, a.record_id, a.action, a.previous, a.new, a.reason, a.sensitive,
+         coalesce(p.name, case when a.actor_id is null and a.action like 'platform\\_%' then 'Platform admin' end) as actor
        from audit_event a left join person p on p.id = a.actor_id
        where ($1::text is null or a.record_type = $1) and ($2::text is null or a.record_id = $2) order by a.at desc limit 500`,
       [query.record_type ?? null, query.record_id ?? null],

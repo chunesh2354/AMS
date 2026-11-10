@@ -11,9 +11,12 @@ import { isUuid, required } from '../../http/validation';
  * SECURITY DEFINER functions (migrations 002 and 003); the ams_app role has no grant on the platform tables.
  * Since 003 every platform action takes the session token hash and the database resolves the admin from it,
  * so no admin id is ever passed except to platform_create_session right after the password is verified.
- * Firm data never crosses this boundary: the firm list carries counts only. The company detail (004) adds only
- * the owner's name, email and invitation state, so the platform can hand over a new invite link.
+ * Business data never crosses this boundary: the firm list carries counts only, and no route returns projects, money
+ * or time. The company detail (004) adds the owner's name, email and invitation state. Since 009 the platform admin
+ * manages each studio's people and accounts (list, add, account types, invite and reset links, disable, enable);
+ * passwords change only through one-time links.
  */
+const ACCOUNT_TYPES = ['principal', 'admin', 'finance', 'pm', 'employee'];
 export const PLATFORM_COOKIE = 'ams_platform';
 export const PLATFORM_PREFIX = '/api/v1/platform/';
 const COOKIE_PATH = '/api/v1/platform';
@@ -218,6 +221,122 @@ export function platformRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secu
   };
   app.post('/api/v1/platform/firms/:id/suspend', secured, setStatus('Suspended'));
   app.post('/api/v1/platform/firms/:id/reactivate', secured, setStatus('Active'));
+
+  // ----- People inside a studio (migration 009) -----
+  // The owner decided the platform admin has full control over a studio's accounts. This is people and sign-in data
+  // only: never projects, money or time. A password changes only through a one-time link; the platform never sets or
+  // sees one. Every action is audited on the platform and in the studio's own audit trail ("Platform admin").
+
+  /** Only these keys leave the server for a person, whatever the function returns. */
+  const personOf = (r: any) => ({
+    id: r.id,
+    name: r.name,
+    work_email: r.work_email,
+    job_title: r.job_title ?? '',
+    account_types: Array.isArray(r.account_types) ? (r.account_types as string[]) : [],
+    invitation_state: r.invitation_state,
+    login_state: r.login_state,
+    last_sign_in_at: iso(r.last_sign_in_at),
+  });
+
+  /** 28000 is a 401 (via query); P0002 an unknown firm or a person not in that firm, so a 404; 23505 a taken email. */
+  const peopleQuery = async (sql: string, params: unknown[]) => {
+    try {
+      return await query(sql, params);
+    } catch (e: any) {
+      if (e?.code === 'P0002') throw new ApiError(404, 'NOT_FOUND', String(e.message || 'Not found.'));
+      if (e?.code === '23505') throw new ApiError(409, 'DUPLICATE_EMAIL', 'An account with this email already exists.', [{ field: 'work_email', code: 'duplicate' }]);
+      throw e;
+    }
+  };
+  const firmIdOf = (req: FastifyRequest) => {
+    const id = (req.params as { id?: string }).id;
+    if (!isUuid(id)) throw notFound('Firm');
+    return id as string;
+  };
+  const personIdOf = (req: FastifyRequest) => {
+    const id = (req.params as { personId?: string }).personId;
+    if (!isUuid(id)) throw notFound('Person');
+    return id as string;
+  };
+  const onePerson = async (tokenHash: string, firmId: string, personId: string) => {
+    const r = (await peopleQuery('select * from platform_firm_people($1, $2, $3)', [tokenHash, firmId, personId])).rows[0];
+    if (!r) throw notFound('Person');
+    return personOf(r);
+  };
+  const typesOf = (v: unknown) => {
+    if (!Array.isArray(v) || v.length === 0) throw invalid('account_types', 'Choose at least one account type.', 'required');
+    const bad = v.filter((t) => typeof t !== 'string' || !ACCOUNT_TYPES.includes(t));
+    if (bad.length) throw new ApiError(400, 'VALIDATION', 'Unknown account type.', [{ field: 'account_types', code: 'unknown', values: bad }]);
+    return ACCOUNT_TYPES.filter((t) => v.includes(t));
+  };
+
+  app.get('/api/v1/platform/firms/:id/people', secured, async (req) => {
+    const rows = (await peopleQuery('select * from platform_firm_people($1, $2)', [adminOf(req).tokenHash, firmIdOf(req)])).rows;
+    return { data: rows.map(personOf) };
+  });
+
+  app.post('/api/v1/platform/firms/:id/people', secured, async (req) => {
+    const admin = adminOf(req);
+    const firmId = firmIdOf(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const name = str(body.name);
+    const email = str(body.work_email).toLowerCase();
+    const jobTitle = str(body.job_title);
+    const details: { field: string; code: string }[] = [];
+    if (!name) details.push({ field: 'name', code: 'required' });
+    if (!EMAIL.test(email)) details.push({ field: 'work_email', code: 'invalid' });
+    if (name.length > 200) details.push({ field: 'name', code: 'too_long' });
+    if (jobTitle.length > 200) details.push({ field: 'job_title', code: 'too_long' });
+    if (details.length) throw new ApiError(400, 'VALIDATION', 'Some details are missing or not valid.', details);
+    const types = typesOf(body.account_types);
+    const token = newToken();
+    const row = (await peopleQuery('select * from platform_create_person($1, $2, $3, $4, $5, $6, $7)',
+      [admin.tokenHash, firmId, name, email, jobTitle, types, hashToken(token)])).rows[0];
+    const person = await onePerson(admin.tokenHash, firmId, row.person_id);
+    return { person, invite_url: `/accept-invite/${token}`, invite_expires_at: iso(row.invite_expires_at), email_sent: false };
+  });
+
+  /** A 24-hour password reset link, for an accepted, enabled account. Earlier unused reset links stop working. */
+  app.post('/api/v1/platform/firms/:id/people/:personId/reset-link', secured, async (req) => {
+    const admin = adminOf(req);
+    const firmId = firmIdOf(req);
+    const personId = personIdOf(req);
+    const token = newToken();
+    const r = (await peopleQuery('select platform_issue_reset_link($1, $2, $3, $4) as expires_at', [admin.tokenHash, firmId, personId, hashToken(token)])).rows[0];
+    return { reset_url: `/reset-password/${token}`, expires_at: iso(r.expires_at), email_sent: false };
+  });
+
+  /** A new 72-hour invite link, while the person has not accepted. Earlier unused invite links stop working. */
+  app.post('/api/v1/platform/firms/:id/people/:personId/invite-link', secured, async (req) => {
+    const admin = adminOf(req);
+    const firmId = firmIdOf(req);
+    const personId = personIdOf(req);
+    const token = newToken();
+    const r = (await peopleQuery('select platform_issue_invite_link($1, $2, $3, $4) as expires_at', [admin.tokenHash, firmId, personId, hashToken(token)])).rows[0];
+    return { invite_url: `/accept-invite/${token}`, invite_expires_at: iso(r.expires_at), email_sent: false };
+  });
+
+  app.put('/api/v1/platform/firms/:id/people/:personId/types', secured, async (req) => {
+    const admin = adminOf(req);
+    const firmId = firmIdOf(req);
+    const personId = personIdOf(req);
+    const types = typesOf((req.body as any)?.account_types);
+    const reason = reasonOf(req.body);
+    await peopleQuery('select platform_set_account_types($1, $2, $3, $4, $5)', [admin.tokenHash, firmId, personId, types, reason]);
+    return { person: await onePerson(admin.tokenHash, firmId, personId) };
+  });
+
+  const setAccess = (enabled: boolean) => async (req: FastifyRequest) => {
+    const admin = adminOf(req);
+    const firmId = firmIdOf(req);
+    const personId = personIdOf(req);
+    const reason = reasonOf(req.body);
+    await peopleQuery('select platform_set_person_access($1, $2, $3, $4, $5)', [admin.tokenHash, firmId, personId, enabled, reason]);
+    return { person: await onePerson(admin.tokenHash, firmId, personId) };
+  };
+  app.post('/api/v1/platform/firms/:id/people/:personId/disable', secured, setAccess(false));
+  app.post('/api/v1/platform/firms/:id/people/:personId/enable', secured, setAccess(true));
 
   // ----- Platform audit -----
   app.get('/api/v1/platform/audit', secured, async (req) => {

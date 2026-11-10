@@ -539,9 +539,10 @@ describe('platform functions are bound to a live platform session (migration 003
     expect(rows.find((r) => r.proname === 'platform_auth_lookup')!.outs).toEqual(['admin_id', 'password_hash']);
     const executable = (await c.f.owner.query(`
       select p.proname from pg_proc p where p.proname like 'platform%' and has_function_privilege('ams_app', p.oid, 'execute') order by 1`)).rows.map((r) => r.proname);
-    expect(executable).toEqual(['platform_audit_list', 'platform_auth_lookup', 'platform_create_firm', 'platform_create_session',
-      'platform_find_session', 'platform_firm_detail', 'platform_list_firms', 'platform_reissue_owner_invite', 'platform_revoke_session',
-      'platform_set_firm_status']);
+    expect(executable).toEqual(['platform_audit_list', 'platform_auth_lookup', 'platform_create_firm', 'platform_create_person', 'platform_create_session',
+      'platform_find_session', 'platform_firm_detail', 'platform_firm_people', 'platform_issue_invite_link', 'platform_issue_reset_link',
+      'platform_list_firms', 'platform_reissue_owner_invite', 'platform_revoke_session', 'platform_set_account_types', 'platform_set_firm_status',
+      'platform_set_person_access']);
   });
 
   it('platform_create_session writes the login audit row and refuses a session longer than 12 hours', async () => {

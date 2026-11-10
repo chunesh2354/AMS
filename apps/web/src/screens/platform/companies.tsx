@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from 'react';
-import { Copy, Plus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Plus } from 'lucide-react';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import {
   createFirm, getFirm, listFirms, listPlatformAudit, platformLogout, platformMe, reactivateFirm, reissueOwnerInvite, suspendFirm,
@@ -19,8 +19,8 @@ import { Sheet } from '../../ui/Sheet';
 import { StatusChip } from '../../ui/StatusChip';
 import { TextArea } from '../../ui/TextArea';
 import { TextField } from '../../ui/TextField';
-import { COPY_BLOCKED, useCopy } from '../../ui/copy';
-import { formatDate, formatGrouped, toISO } from '../../ui/format';
+import { formatDate, formatGrouped } from '../../ui/format';
+import { EMAIL_NOT_CONNECTED, INVITATION_LABEL, LinkField, PeopleActionSheet, PeopleSection, dateTimeOf, type PeopleAction } from './people';
 
 export const PRODUCT_NAME = 'Practice platform';
 
@@ -28,13 +28,8 @@ const TIMEZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/Londo
 const CURRENCIES = ['INR', 'AED', 'SGD', 'GBP', 'USD', 'AUD'];
 
 const dateOf = (iso: string) => formatDate(iso.slice(0, 10));
-/** Same date style as the rest of the app ("08 Nov 2026"), in local time, then the time. */
-const dateTimeOf = (iso: string) => {
-  const d = new Date(iso);
-  return `${formatDate(toISO(d))}, ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
-};
 
-/** /platform. A layout of its own, outside the firm shell: no firm nav, no firm data, counts only. */
+/** /platform. A layout of its own, outside the firm shell: no firm nav; company counts and each company's people, never projects, money or time. */
 export function PlatformCompaniesScreen() {
   return (
     <div className="scr-platform">
@@ -92,6 +87,8 @@ function LivePanel() {
   const [action, setAction] = useState<Action | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [openFirm, setOpenFirm] = useState<PlatformFirm | null>(null);
+  const [peopleAction, setPeopleAction] = useState<PeopleAction | null>(null);
+  const [peopleNotice, setPeopleNotice] = useState<string | null>(null);
 
   const loadFirms = useCallback(async () => {
     setState('loading');
@@ -198,10 +195,17 @@ function LivePanel() {
       </main>
       <AddCompanySheet open={adding} onClose={() => setAdding(false)} onCreated={refresh} />
       <CompanySheet
-        firm={openFirm}
-        onClose={() => setOpenFirm(null)}
+        firm={peopleAction ? null : openFirm}
+        onClose={() => { setOpenFirm(null); setPeopleNotice(null); }}
         onChanged={refresh}
-        onStatus={(kind, firm) => { setOpenFirm(null); setAction({ kind, firm, fromDetail: true }); }}
+        onStatus={(kind, firm) => { setOpenFirm(null); setPeopleNotice(null); setAction({ kind, firm, fromDetail: true }); }}
+        peopleNotice={peopleNotice}
+        onPeopleAction={(a) => { setPeopleNotice(null); setPeopleAction(a); }}
+      />
+      <PeopleActionSheet
+        action={peopleAction}
+        onClose={() => setPeopleAction(null)}
+        onChanged={(msg) => { if (msg) setPeopleNotice(msg); refresh(); }}
       />
       <StatusSheet
         action={action}
@@ -224,32 +228,30 @@ export function describeAction(e: Pick<PlatformAuditEntry, 'action' | 'firm_name
     case 'suspend_firm': return `Suspended ${firm}`;
     case 'reactivate_firm': return `Reactivated ${firm}`;
     case 'reissue_owner_invite': return `Sent a new owner invite for ${firm}`;
-    default: return [e.action, e.firm_name].filter(Boolean).join(': ');
+    case 'create_account': return `Added a person to ${firm}`;
+    case 'issue_reset_link': return `Created a password reset link at ${firm}`;
+    case 'reinvite': return `Created a new invite link at ${firm}`;
+    case 'set_account_types': return `Changed an account type at ${firm}`;
+    case 'disable': return `Disabled sign-in for a person at ${firm}`;
+    case 'enable': return `Enabled sign-in for a person at ${firm}`;
+    default: return [humanize(e.action), e.firm_name].filter(Boolean).join(': ');
   }
 }
 
-/** A read-only invite link that selects itself, a Copy button that says when it worked, and a fallback when it did not. */
-function InviteLinkField({ url }: { url: string }) {
-  const id = useId();
-  const { state, copy } = useCopy();
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
-      <TextField id={id} label="Invite link" value={url} readOnly mono onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} />
-      <div><Button icon={<Copy size={16} strokeWidth={1.5} aria-hidden />} onClick={() => void copy(url, id)}>{state === 'copied' ? 'Copied' : 'Copy link'}</Button></div>
-      {state === 'copied' && <span className="sr-only" role="status">Invite link copied.</span>}
-      {state === 'blocked' && <InlineAlert variant="warn" title={COPY_BLOCKED} />}
-    </div>
-  );
-}
+/** An action code the screen does not know yet, in words: "merge_people" becomes "Merge people". */
+const humanize = (action: string) => {
+  const words = action.replace(/_/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : words;
+};
 
-const INVITATION_LABEL: Record<string, string> = { 'Not sent': 'Not sent', Sent: 'Invite sent', Accepted: 'Accepted', Expired: 'Invite expired' };
-
-/** One company: counts, settings and the owner. Never projects, money or the firm's other people. */
-function CompanySheet({ firm, onClose, onChanged, onStatus }: {
+/** One company: counts, settings, the owner and its people. Never projects, money or time. */
+function CompanySheet({ firm, onClose, onChanged, onStatus, peopleNotice, onPeopleAction }: {
   firm: PlatformFirm | null;
   onClose: () => void;
   onChanged: () => void;
   onStatus: (kind: 'suspend' | 'reactivate', firm: PlatformFirm) => void;
+  peopleNotice: string | null;
+  onPeopleAction: (action: PeopleAction) => void;
 }) {
   const [detail, setDetail] = useState<PlatformFirmDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -306,7 +308,7 @@ function CompanySheet({ firm, onClose, onChanged, onStatus }: {
   );
 
   return (
-    <Sheet open onClose={onClose} title={firm.trading_name} description="Company detail" size={480} footer={footer}>
+    <Sheet open onClose={onClose} title={firm.trading_name} description="Company detail" size={640} footer={footer}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-5)' }}>
         {state === 'loading' && <ListStateBlock state="loading" label="Company detail" rows={6} />}
         {state === 'error' && <ListStateBlock state="error" label="Company detail" errorMessage={error} onRetry={() => void load(firm.id)} />}
@@ -341,8 +343,8 @@ function CompanySheet({ firm, onClose, onChanged, onStatus }: {
                   <InlineAlert variant="success" title="New invite link ready.">
                     Send it to {shown.owner_name ?? 'the owner'}. It works once and expires on {dateTimeOf(invite.invite_expires_at)}. Earlier links no longer work.
                   </InlineAlert>
-                  <InviteLinkField url={new URL(invite.invite_url, window.location.origin).toString()} />
-                  <InlineAlert variant="warn" title="Email delivery is not connected.">No email was sent. Share the link with the owner yourself.</InlineAlert>
+                  <LinkField label="Invite link" url={new URL(invite.invite_url, window.location.origin).toString()} />
+                  <InlineAlert variant="warn" title={EMAIL_NOT_CONNECTED}>No email was sent. Share the link with the owner yourself.</InlineAlert>
                 </>
               ) : canInvite ? (
                 <div><Button loading={inviting} onClick={() => void newInvite()}>New invite link</Button></div>
@@ -350,6 +352,7 @@ function CompanySheet({ firm, onClose, onChanged, onStatus }: {
                 <span className="t-body-sm ink-2">Reactivate the company to send the owner a new invite link.</span>
               ) : null}
             </section>
+            <PeopleSection firmId={firm.id} firmName={firm.trading_name} notice={peopleNotice} onAction={onPeopleAction} />
           </>
         )}
       </div>
@@ -437,8 +440,8 @@ function AddCompanySheet({ open, onClose, onCreated }: { open: boolean; onClose:
       {result ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
           <InlineAlert variant="success" title={`${form.trading_name.trim()} is ready.`}>Send this invite link to {form.owner_name.trim()}. It works once and expires on {dateTimeOf(result.invite_expires_at)}.</InlineAlert>
-          <InviteLinkField url={inviteLink} />
-          <InlineAlert variant="warn" title="Email delivery is not connected.">No email was sent. Share the link with the owner yourself.</InlineAlert>
+          <LinkField label="Invite link" url={inviteLink} />
+          <InlineAlert variant="warn" title={EMAIL_NOT_CONNECTED}>No email was sent. Share the link with the owner yourself.</InlineAlert>
           <span className="t-body-sm ink-2">Lost the link? Open the company from the list and choose New invite link.</span>
         </div>
       ) : (

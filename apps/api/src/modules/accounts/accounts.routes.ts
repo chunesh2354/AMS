@@ -69,6 +69,9 @@ export async function revokeOpenLinks(tx: Tx, personId: string, actorId: string)
 
 /** Section 5.3 rule 8: the last active principal keeps principal and keeps access. */
 async function assertNotLastPrincipal(tx: Tx, personId: string) {
+  // The same per-firm lock as the platform side (migration 009, platform_assert_not_last_principal): a studio change and
+  // a platform change made at the same moment must not both see the other principal and both take it away.
+  await tx.query(`select pg_advisory_xact_lock(hashtext('principals:' || firm_id::text)) from person where id = $1`, [personId]);
   const others = (await tx.query(
     `select count(distinct g.person_id)::int n from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id
      where s.key = 'principal' and p.login_state = 'Enabled' and p.employment_state <> 'Ended' and p.invitation_state = 'Accepted' and g.person_id <> $1`, [personId],

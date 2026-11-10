@@ -31,6 +31,9 @@ const EXACT = new Set([
   'POST /api/v1/platform/auth/login',
   'POST /api/v1/auth/accept-invite',
   'POST /api/v1/me/password',
+  // The platform admin's one-time links for a studio's people (migration 009): they hand over who sets a password.
+  'POST /api/v1/platform/firms/:id/people/:personId/reset-link',
+  'POST /api/v1/platform/firms/:id/people/:personId/invite-link',
 ]);
 const RESET = '/api/v1/auth/reset';
 
