@@ -15,10 +15,10 @@ export const Firm: StoryObj = {
   render: () => (
     <AppShell
       interface="firm"
-      sideNav={<SideNav brand="Studio Meridian (DEMO)" sections={[{ label: 'Work', items: [{ to: '/firm/overview', label: 'Overview', icon: <LayoutDashboard {...i} /> }, { to: '/firm/approvals', label: 'Approvals', icon: <Inbox {...i} />, badge: 14 }] }]} />}
-      topBar={<TopBar onSearch={() => {}} notifications={[]} userName="Asha Rao" menuItems={[{ label: 'My profile' }]} timer={<TimerPill state="idle" />} />}
+      sideNav={<SideNav brand="Studio Meridian (DEMO)" sections={[{ label: 'Work', items: [{ to: '/firm/overview', label: 'Overview', icon: <LayoutDashboard {...i} /> }, { to: '/firm/approvals', label: 'Approvals', icon: <Inbox {...i} />, badge: 14 }] }]} user={{ name: 'Asha Rao', title: 'Principal', menuItems: [{ label: 'My profile' }], onSignOut: () => {} }} />}
+      topBar={<TopBar onSearch={() => {}} notifications={[]} timer={<TimerPill state="idle" />} />}
     >
-      <PageHeader display title="Good afternoon, Asha" meta={<span className="t-numeric ink-2">06 Nov 2026</span>} primaryAction={<Button variant="primary">Add person</Button>} />
+      <PageHeader display title="Good afternoon, Asha" subtitle="Friday 6 November 2026" primaryAction={<Button variant="primary">Add person</Button>} />
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
         <QueueCard count={3} label="Missing time" severity="warn" />
         <QueueCard count={14} label="Pending approvals" severity="warn" />

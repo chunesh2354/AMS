@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getPerson, getWorkingPattern, personName } from '../../api';
+import { ApiFailure, failureMessage, isLive } from '../../api/live';
+import { changePassword } from '../../api/live/password';
 import { useResource } from '../../api/useResource';
 import { useSession } from '../../app/session';
 import { SettingsLayout } from '../../layouts/SettingsLayout';
@@ -13,6 +15,10 @@ import { PageHeader } from '../../ui/PageHeader';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { GoTo } from '../shared/go-to';
+import { MIN_PASSWORD } from '../auth/accept-invite';
+import { InlineAlert } from '../../ui/InlineAlert';
+import { NotAvailable } from '../../ui/NotAvailable';
+import { getProfile } from '../../api/live/people';
 
 function Personal({ name }: { name: string }) {
   const toast = useToast();
@@ -39,18 +45,73 @@ function Personal({ name }: { name: string }) {
   );
 }
 
-export function MyProfileScreen() {
+const BLANK_PASSWORDS = { current: '', next: '', confirm: '' };
+
+/** Signed-in password change. The server checks the current password and signs out every other session. */
+export function ChangePassword() {
+  const toast = useToast();
+  const [form, setForm] = useState(BLANK_PASSWORDS);
+  const [tried, setTried] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [wrongCurrent, setWrongCurrent] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const set = (k: keyof typeof BLANK_PASSWORDS, v: string) => { setForm((f) => ({ ...f, [k]: v })); if (k === 'current') setWrongCurrent(null); };
+
+  const errors = {
+    current: !form.current ? 'Enter your current password' : wrongCurrent ?? undefined,
+    next: form.next.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters` : form.next === form.current ? 'Choose a password different from your current one' : undefined,
+    confirm: !form.confirm ? 'Enter the new password again' : form.confirm !== form.next ? 'The passwords do not match' : undefined,
+  };
+  const show = (k: keyof typeof errors) => (tried || (k === 'current' && wrongCurrent) ? errors[k] : undefined);
+
+  const save = async () => {
+    setTried(true);
+    setFailure(null);
+    if (errors.current || errors.next || errors.confirm) return;
+    if (!isLive) { toast({ variant: 'success', message: 'Your new password is checked. Nothing is saved in this demo.' }); setForm(BLANK_PASSWORDS); setTried(false); return; }
+    setBusy(true);
+    try {
+      await changePassword(form.current, form.next);
+      setForm(BLANK_PASSWORDS);
+      setTried(false);
+      toast({ variant: 'success', message: 'Password changed. You are signed out on your other devices.' });
+    } catch (e) {
+      if (e instanceof ApiFailure && e.code === 'WRONG_PASSWORD') setWrongCurrent('Your current password is not correct');
+      else setFailure(failureMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="solid-panel settings__panel">
+      <Form onSubmit={(e) => { e.preventDefault(); void save(); }} aria-label="Change password">
+        <FormSection title="Change password">
+          {failure && <InlineAlert variant="danger" title={failure} />}
+          <TextField label="Current password" type="password" autoComplete="current-password" value={form.current} onChange={(e) => set('current', e.target.value)} error={show('current')} />
+          <TextField label="New password" type="password" autoComplete="new-password" value={form.next} onChange={(e) => set('next', e.target.value)} error={show('next')} helper={`At least ${MIN_PASSWORD} characters.`} />
+          <TextField label="Confirm new password" type="password" autoComplete="new-password" value={form.confirm} onChange={(e) => set('confirm', e.target.value)} error={show('confirm')} />
+          <p className="t-caption ink-2">You stay signed in here. Every other device is signed out.</p>
+        </FormSection>
+        <FormFooter><Button variant="primary" type="submit" loading={busy}>Change password</Button></FormFooter>
+      </Form>
+    </div>
+  );
+}
+
+function MockMyProfileScreen() {
   const { viewer } = useSession();
   const [params] = useSearchParams();
-  const section = params.get('section') === 'personal' ? 'personal' : 'work';
+  const raw = params.get('section');
+  const section = raw === 'personal' || raw === 'password' ? raw : 'work';
   const { state, data: person, retry } = useResource(() => getPerson(viewer.id), [viewer.id]);
   const pattern = useResource(() => getWorkingPattern(viewer.id), [viewer.id]);
   const versions = pattern.data ?? [];
   return (
     <>
       <PageHeader title={viewer.name} subtitle={viewer.title} lead={<Avatar name={viewer.name} size={36} />} />
-      <SettingsLayout label="My profile" items={[{ label: 'Work details', to: '?section=work', active: section === 'work' }, { label: 'Personal details', to: '?section=personal', active: section === 'personal' }]}>
-        {state !== 'ready' || !person
+      <SettingsLayout label="My profile" items={[{ label: 'Work details', to: '?section=work', active: section === 'work' }, { label: 'Personal details', to: '?section=personal', active: section === 'personal' }, { label: 'Password', to: '?section=password', active: section === 'password' }]}>
+        {section === 'password' ? <ChangePassword /> : state !== 'ready' || !person
           ? <ListStateBlock state={state === 'ready' ? 'empty' : state} label="Your profile" onRetry={retry} capability="view your profile" empty={{ message: 'Your profile is not set up yet.', action: <GoTo to="/me/home">Back to My day</GoTo> }} />
           : section === 'work'
             ? (
@@ -72,6 +133,51 @@ export function MyProfileScreen() {
               </div>
             )
             : <Personal name={person.name} />}
+      </SettingsLayout>
+    </>
+  );
+}
+
+export function MyProfileScreen() {
+  return isLive ? <LiveMyProfileScreen /> : <MockMyProfileScreen />;
+}
+
+/**
+ * Live mode: work details from GET /people/:id/profile. Personal details and the working pattern have no API yet,
+ * so they say so instead of showing the sample studio's.
+ */
+function LiveMyProfileScreen() {
+  const { viewer } = useSession();
+  const [params] = useSearchParams();
+  const raw = params.get('section');
+  const section = raw === 'personal' || raw === 'password' ? raw : 'work';
+  const key = viewer.personId ?? viewer.id;
+  const { state, data: person, retry } = useResource(() => getProfile(key), [key]);
+  return (
+    <>
+      <PageHeader title={viewer.name} subtitle={viewer.title} lead={<Avatar name={viewer.name} size={36} />} />
+      <SettingsLayout label="My profile" items={[{ label: 'Work details', to: '?section=work', active: section === 'work' }, { label: 'Personal details', to: '?section=personal', active: section === 'personal' }, { label: 'Password', to: '?section=password', active: section === 'password' }]}>
+        {section === 'password' ? <ChangePassword />
+          : section === 'personal'
+            ? <div className="solid-panel settings__panel"><h2 className="t-h3">Personal details</h2><NotAvailable detail="Your display name, phone and emergency contact." /></div>
+            : state !== 'ready' || !person
+              ? <ListStateBlock state={state === 'ready' ? 'empty' : state} label="Your profile" onRetry={retry} capability="view your profile" empty={{ message: 'Your profile is not set up yet.', action: <GoTo to="/me/home">Back to My day</GoTo> }} />
+              : (
+                <div className="solid-panel settings__panel">
+                  <section className="stack-rows">
+                    <h2 className="t-h3">Work details</h2>
+                    <dl className="def-list">
+                      <dt>Email</dt><dd>{person.email}</dd>
+                      <dt>Manager</dt><dd className="dt__person">{person.manager ? <><Avatar name={person.manager} size={20} />{person.manager}</> : 'None'}</dd>
+                      <dt>Projects</dt><dd className="t-numeric">{person.projects.map((p) => p.code).join(', ') || 'None yet'}</dd>
+                    </dl>
+                  </section>
+                  <section className="stack-rows">
+                    <h2 className="t-h3">Working pattern</h2>
+                    <NotAvailable detail="Your working days and hours, and how they changed over time." />
+                  </section>
+                </div>
+              )}
       </SettingsLayout>
     </>
   );

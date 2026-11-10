@@ -8,7 +8,7 @@ export type PageTab = { label: string; to: string; end?: boolean; active?: boole
 
 export type PageHeaderProps = {
   title: string;
-  /** Display size is for Overview greetings and dashboards. */
+  /** Kept for Overview greetings and dashboards; the approved design sets every page title at 40 px. */
   display?: boolean;
   breadcrumb?: Crumb[];
   lead?: ReactNode;
@@ -20,7 +20,7 @@ export type PageHeaderProps = {
   tabs?: PageTab[];
 };
 
-/** Sticky under the top bar. Becomes a glass bar once stuck, and hides its meta row. */
+/** Sticky under the top bar. Once stuck it gains a hairline, shrinks the title and hides its meta row. */
 export function PageHeader({ title, display, breadcrumb, lead, subtitle, meta, primaryAction, secondaryActions, period, tabs }: PageHeaderProps) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
@@ -33,7 +33,7 @@ export function PageHeader({ title, display, breadcrumb, lead, subtitle, meta, p
   return (
     <>
       <div ref={sentinel} aria-hidden style={{ height: 1, marginBottom: -1 }} />
-      <div className={cx('pagehead', stuck && 'pagehead--stuck glass glass--bar', tabs && 'pagehead--tabs')}>
+      <div className={cx('pagehead', stuck && 'pagehead--stuck', tabs && 'pagehead--tabs')}>
         {breadcrumb && (
           <nav className="pagehead__crumb" aria-label="Breadcrumb">
             <ol>
@@ -45,9 +45,9 @@ export function PageHeader({ title, display, breadcrumb, lead, subtitle, meta, p
           <div style={{ minWidth: 0 }}>
             <div className="person-head">
               {lead}
-              <div>
-                <h1 className={display ? 't-display' : 't-h1'}>{title}</h1>
-                {subtitle && <p className="t-body-sm ink-2">{subtitle}</p>}
+              <div className="pagehead__heading">
+                <h1 className={cx(display ? 't-display' : 't-h1', 'pagehead__title')}>{title}</h1>
+                {subtitle && <p className="pagehead__context">{subtitle}</p>}
               </div>
             </div>
             {meta && <div className="pagehead__meta">{meta}</div>}

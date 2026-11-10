@@ -9,8 +9,10 @@ import { PlannerLegend } from '../../ui/PlannerGrid';
 import { Skeleton } from '../../ui/Skeleton';
 import { PLANNER_HINT, usePlanner } from '../shared/use-planner';
 import { GoTo } from '../shared/go-to';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
-export function WorkloadScreen() {
+function MockWorkloadScreen() {
   const planner = usePlanner();
   const people = useResource(getPeople, []);
   const list = people.data ?? [];
@@ -30,4 +32,9 @@ export function WorkloadScreen() {
       {planner.sheets}
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function WorkloadScreen() {
+  return isLive ? <NotAvailablePage title="Workload" detail="Who is booked on which project, week by week, against their capacity." /> : <MockWorkloadScreen />;
 }

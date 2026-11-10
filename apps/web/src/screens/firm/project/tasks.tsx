@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { getPeople, getTasks, personName, type Priority, type Task, type TaskStage } from '../../../api';
 import { useResource } from '../../../api/useResource';
+import { isLive } from '../../../api/live';
 import { TODAY } from '../../../mock/studio-meridian';
 import { Button } from '../../../ui/Button';
 import { DataTable, type Column } from '../../../ui/DataTable';
@@ -18,6 +19,7 @@ import { TextField } from '../../../ui/TextField';
 import { useToast } from '../../../ui/Toast';
 import { PriorityDot, TaskCardBody, taskStatus } from '../../shared/task-bits';
 import { TaskSheet } from '../../shared/task-sheet';
+import { LiveProjectTasksScreen } from './tasks-live';
 
 const STAGES: TaskStage[] = ['Planned', 'Ready', 'In progress', 'In review', 'Done'];
 const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
@@ -54,7 +56,12 @@ function AddTaskSheet({ open, onClose, onAdd, project, phases, people }: { open:
   );
 }
 
+/** Live mode reads the API (see LiveProjectTasksScreen); mock mode is the sample studio, unchanged. */
 export function ProjectTasksScreen() {
+  return isLive ? <LiveProjectTasksScreen /> : <MockProjectTasksScreen />;
+}
+
+function MockProjectTasksScreen() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const toast = useToast();

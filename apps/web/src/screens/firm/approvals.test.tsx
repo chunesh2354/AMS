@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { openApp } from '../test-utils';
+import { delegateStart } from './approvals';
 
 const rail = () => screen.getByRole('navigation', { name: 'Queues' });
 
@@ -53,5 +54,34 @@ describe('Approval inbox', () => {
   it.each([['error', /could not be loaded/], ['empty', /Nothing is waiting/], ['denied', /permission/]])('reaches the %s state', async (demo, text) => {
     openApp(`/firm/approvals?demo=${demo}`);
     expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+  it('has no row Approve on the exception row; it is approved from the preview', async () => {
+    openApp('/firm/approvals?queue=Time');
+    const list = await screen.findByRole('region', { name: 'Approval items' });
+    const exception = within(list).getAllByRole('listitem').find((li) => li.textContent?.includes('Over 12 h'))!;
+    expect(within(exception).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(within(exception).getByRole('button', { name: 'Return' })).toBeInTheDocument();
+    const others = within(list).getAllByRole('listitem').filter((li) => li !== exception);
+    for (const li of others) expect(within(li).getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+});
+
+describe('delegation dates', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  it("start from the studio's today in its time zone, not a date fixed in the build", () => {
+    expect(delegateStart('Asia/Kolkata', new Date('2027-03-09T20:00:00Z'))).toBe('2027-03-10');
+    expect(delegateStart('America/New_York', new Date('2027-03-10T03:00:00Z'))).toBe('2027-03-09');
+    expect(delegateStart(undefined, new Date('2027-03-09T20:00:00Z'))).toBe('2027-03-10');
+  });
+  it('the delegate calendar opens on today and refuses days before it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-03-10T06:00:00Z'));
+    openApp('/firm/approvals?queue=Bills');
+    const list = await screen.findByRole('region', { name: 'Approval items' });
+    await userEvent.click(within(list).getByRole('button', { name: 'Delegate' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delegate approval' });
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Dates/ }));
+    expect(await screen.findByRole('button', { name: /^9 Mar 2027/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^10 Mar 2027/ })).toBeEnabled();
   });
 });

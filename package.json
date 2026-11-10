@@ -1,0 +1,18 @@
+{
+  "name": "ams",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Architecture firm practice management. Delegating scripts only: install dependencies inside apps/api and apps/web.",
+  "scripts": {
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:web:live": "npm --prefix apps/web run dev:live",
+    "test:api": "npm --prefix apps/api test",
+    "test:web": "npm --prefix apps/web test",
+    "test:e2e": "npm --prefix apps/web run test:e2e",
+    "test:e2e:live": "cd apps/web && npx playwright test -c playwright.live.config.ts",
+    "lint": "npm --prefix apps/web run lint",
+    "typecheck": "npm --prefix apps/api run typecheck && npm --prefix apps/web run typecheck",
+    "build": "npm --prefix apps/web run build"
+  }
+}

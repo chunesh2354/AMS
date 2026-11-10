@@ -33,6 +33,11 @@ import { MyScheduleScreen } from './screens/me/schedule';
 import { MyTimeScreen } from './screens/me/time';
 import { MyWorkScreen } from './screens/me/work';
 import { ProjectsScreen } from './screens/firm/projects';
+import { LoginScreen, StudioLoginScreen, TeamLoginScreen } from './screens/auth/login';
+import { AcceptInviteScreen } from './screens/auth/accept-invite';
+import { ResetPasswordScreen } from './screens/auth/reset-password';
+import { PlatformLoginScreen } from './screens/platform/login';
+import { PlatformCompaniesScreen } from './screens/platform/companies';
 
 function FirmGuard() {
   const { viewer } = useSession();
@@ -48,6 +53,13 @@ function FirmGuard() {
 /** Route paths come from section 9 of the brief and must not change. */
 export const routes: RouteObject[] = [
   { path: '/', element: <Navigate to="/firm/overview" replace /> },
+  { path: '/login', element: <LoginScreen /> },
+  { path: '/login/studio', element: <StudioLoginScreen /> },
+  { path: '/login/team', element: <TeamLoginScreen /> },
+  { path: '/accept-invite/:token', element: <AcceptInviteScreen /> },
+  { path: '/reset-password/:token', element: <ResetPasswordScreen /> },
+  { path: '/platform/login', element: <PlatformLoginScreen /> },
+  { path: '/platform', element: <PlatformCompaniesScreen /> },
   {
     path: '/firm',
     element: <ShellLayout iface="firm" />,

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { openApp } from '../test-utils';
+import { pmNameOf } from './projects';
+import { preparedByName } from './billing';
 
 describe('Projects list', () => {
   it('shows three projects with risk from the brief', async () => {
@@ -59,5 +61,12 @@ describe('Project Overview', () => {
   it('handles an unknown project', async () => {
     openApp('/firm/projects/PRJ-99');
     expect(await screen.findByText('No project has that code.')).toBeInTheDocument();
+  });
+});
+
+describe('sample names in mock mode', () => {
+  it('looks a PM or preparer up by ref code in the sample studio', () => {
+    expect(pmNameOf({ pmId: 'P02' } as Parameters<typeof pmNameOf>[0])).toBe('Vikram Nair');
+    expect(preparedByName({ preparedBy: 'P02' }, false)).toBe('Vikram Nair');
   });
 });

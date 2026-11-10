@@ -1,47 +1,52 @@
-@import '@fontsource/geist-sans/400.css';
-@import '@fontsource/geist-sans/500.css';
-@import '@fontsource/geist-sans/600.css';
+@import '@fontsource-variable/jost/wght.css';
 @import '@fontsource/geist-mono/400.css';
-@import '@fontsource/geist-mono/500.css';
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
+  /* Keep focused rows clear of the 56 px top bar and 40 px sticky table header (WCAG 2.4.11). */
+  scroll-padding-top: calc(56px + 40px);
   font-family: var(--font-sans);
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  background: var(--surface-muted);
-  color: var(--ink-1);
+  background: var(--surface);
+  color: var(--ink-body);
 }
-body { margin: 0; font: var(--text-body); color: var(--ink-1); min-height: 100vh; }
-/* The plane is fixed, so glass has something to refract while content scrolls. */
-body::before {
-  content: ''; position: fixed; inset: 0; z-index: -1;
-  background: var(--bg-plane-accent), var(--bg-plane);
-}
+body { margin: 0; font: var(--text-body); color: var(--ink-body); background: var(--surface); min-height: 100vh; }
 h1, h2, h3, h4, p, ul, ol, dl, dd, figure { margin: 0; padding: 0; }
+h1, h2, h3, h4 { font-weight: 500; color: var(--ink-1); }
 ul, ol { list-style: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-a { color: var(--accent-text); text-decoration: none; }
+a { color: var(--ink-1); text-decoration: none; text-underline-offset: 3px; }
 a:hover { text-decoration: underline; }
 svg { display: block; flex: none; }
 :focus { outline: none; }
-:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+:focus-visible { outline: 2px solid var(--rule); outline-offset: 3px; box-shadow: none; }
+kbd { font-family: var(--font-mono); }
 
-.t-display { font: var(--text-display); letter-spacing: var(--track-display); }
-.t-h1 { font: var(--text-h1); letter-spacing: var(--track-h1); }
-.t-h2 { font: var(--text-h2); letter-spacing: var(--track-h2); }
-.t-h3 { font: var(--text-h3); }
+.t-display { font: var(--text-display); letter-spacing: var(--track-display); color: var(--ink-1); }
+.t-h1 { font: var(--text-h1); letter-spacing: var(--track-h1); color: var(--ink-1); }
+.t-h2 { font: var(--text-h2); letter-spacing: var(--track-h2); color: var(--ink-1); }
+.t-h3 { font: var(--text-h3); color: var(--ink-1); }
 .t-body { font: var(--text-body); }
 .t-body-sm { font: var(--text-body-sm); }
-.t-label { font: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+.t-label { font: var(--text-label); letter-spacing: var(--track-label); }
 .t-caption { font: var(--text-caption); }
-.t-numeric { font: var(--text-numeric); }
-.t-kpi { font: var(--text-kpi); letter-spacing: var(--track-kpi); }
-.t-timer { font: var(--text-timer); }
+.t-numeric { font: var(--text-numeric); font-variant-numeric: tabular-nums; }
+.t-kpi { font: var(--text-kpi); letter-spacing: var(--track-kpi); color: var(--ink-1); font-variant-numeric: tabular-nums; }
+.t-timer { font: var(--text-timer); font-variant-numeric: tabular-nums; }
+.ink-1 { color: var(--ink-1); }
 .ink-2 { color: var(--ink-2); }
+.ink-3 { color: var(--ink-3); }
+.redline { color: var(--redline); }
+
+/* A main section opens with a 1px black rule; panels inside it are divided by hairlines. */
+.rule-top { border-top: 1px solid var(--rule); padding-top: var(--s-4); }
+.hairline-top { border-top: 1px solid var(--line); }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -54,12 +59,18 @@ svg { display: block; flex: none; }
 .tone-ok { --tone: var(--ok); --tone-soft: var(--ok-soft); --tone-ink: var(--ok-ink); }
 .tone-danger { --tone: var(--danger); --tone-soft: var(--danger-soft); --tone-ink: var(--danger-ink); }
 
+/* Status marker: an 8px square beside sentence-case text (see status-colors.ts). */
+.marker { display: inline-block; flex: none; width: 8px; height: 8px; background: var(--ink-1); }
+.marker--filled { background: var(--ink-1); }
+.marker--outlined { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-1); }
+.marker--alert { background: var(--redline); }
+.marker--done { background: var(--neutral); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; animation-iteration-count: 1 !important; }
 }
 @media print {
-  body::before { display: none; }
-  html { background: white; }
+  html, body { background: white; }
   .glass, .glass--elevated { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
   .sidenav, .topbar, .tabbar, .filters, .subnav, .pagehead__actions { display: none !important; }
   .dt tbody tr > * { background: none !important; }

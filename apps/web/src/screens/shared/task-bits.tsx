@@ -3,8 +3,8 @@ import { StatusChip } from '../../ui/StatusChip';
 import { formatDate } from '../../ui/format';
 import { personName, type Task } from '../../api';
 
-export function PriorityDot({ priority, withLabel }: { priority: Task['priority']; withLabel?: boolean }) {
-  return <span className="prio"><StatusChip dot status={priority} label={`${priority} priority`} />{withLabel && priority}</span>;
+export function PriorityDot({ priority }: { priority: Task['priority']; withLabel?: boolean }) {
+  return <span className="prio t-caption ink-2" role="img" aria-label={`${priority} priority`}>{priority}</span>;
 }
 
 export function TaskCardBody({ task }: { task: Task }) {

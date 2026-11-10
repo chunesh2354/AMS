@@ -16,6 +16,8 @@ import { Skeleton } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';
 import { Tooltip } from '../../ui/Tooltip';
 import { GoTo } from '../shared/go-to';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
 const FILTERS: FilterDef[] = [
   { type: 'select', key: 'period', label: 'Period', options: [{ value: '2026-10', label: 'Oct 2026' }, { value: '2026-09', label: 'Sep 2026' }] },
@@ -71,7 +73,7 @@ function Body({ r, retry }: { r: ReportView; retry: () => void }) {
   );
 }
 
-export function ReportsScreen() {
+function MockReportsScreen() {
   const { key = 'utilization' } = useParams();
   const { viewer } = useSession();
   const { state, data, retry } = useResource(() => getReport(key, viewer), [key, viewer.id]);
@@ -88,4 +90,9 @@ export function ReportsScreen() {
       </SettingsLayout>
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function ReportsScreen() {
+  return isLive ? <NotAvailablePage title="Reports" detail="Utilization, contribution, fee entitlement and the other studio reports." /> : <MockReportsScreen />;
 }

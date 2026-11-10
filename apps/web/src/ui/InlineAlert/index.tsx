@@ -3,9 +3,9 @@ import { X } from 'lucide-react';
 import { IconButton } from '../IconButton';
 import { VARIANT_ICON, VARIANT_TONE, type ToastVariant } from '../Toast';
 
-export type InlineAlertProps = { variant?: ToastVariant; title: string; children?: ReactNode; links?: { label: string; href: string }[]; dismissible?: boolean };
+export type InlineAlertProps = { variant?: ToastVariant; title: string; children?: ReactNode; links?: { label: string; href: string }[]; dismissible?: boolean; onDismiss?: () => void };
 
-export function InlineAlert({ variant = 'info', title, children, links, dismissible }: InlineAlertProps) {
+export function InlineAlert({ variant = 'info', title, children, links, dismissible, onDismiss }: InlineAlertProps) {
   const [gone, setGone] = useState(false);
   if (gone) return null;
   const Icon = VARIANT_ICON[variant];
@@ -17,7 +17,7 @@ export function InlineAlert({ variant = 'info', title, children, links, dismissi
         {children && <p>{children}</p>}
         {links && <div className="alert__links">{links.map((l) => <a key={l.href} href={l.href}>{l.label}</a>)}</div>}
       </div>
-      {dismissible && <IconButton dense label="Dismiss" icon={<X size={16} strokeWidth={1.5} aria-hidden />} onClick={() => setGone(true)} />}
+      {dismissible && <IconButton dense label="Dismiss" icon={<X size={16} strokeWidth={1.5} aria-hidden />} onClick={() => { setGone(true); onDismiss?.(); }} />}
     </div>
   );
 }

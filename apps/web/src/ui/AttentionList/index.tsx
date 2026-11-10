@@ -18,7 +18,7 @@ export function AttentionList({ title = 'Needs attention', items, state = 'ready
   const effective = state === 'ready' && items.length === 0 ? 'empty' : state;
   return (
     <section className="attention solid-panel" aria-label={title}>
-      <header className="attention__head"><h2 className="t-h2">{title}</h2><span className="t-caption ink-2">Severity, then age</span></header>
+      <header className="attention__head"><h2 className="t-h2">{title}</h2><span className="t-caption ink-2">Sorted by severity, then age</span></header>
       {effective !== 'ready'
         ? <div className="attention__state"><ListStateBlock state={effective} label={title} onRetry={onRetry} capability={capability} empty={{ message: emptyMessage }} /></div>
         : <ul>

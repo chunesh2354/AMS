@@ -9,10 +9,12 @@ import { PlannerGrid, PlannerLegend, type PlannerAllocation, type PlannerMark } 
 import { Skeleton } from '../../ui/Skeleton';
 import { useMediaQuery } from '../../ui/useMediaQuery';
 import { GoTo } from '../shared/go-to';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
 const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export function MyScheduleScreen() {
+function MockMyScheduleScreen() {
   const navigate = useNavigate();
   const { viewer } = useSession();
   const phone = useMediaQuery('(max-width: 767px)');
@@ -47,4 +49,9 @@ export function MyScheduleScreen() {
           )}
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function MyScheduleScreen() {
+  return isLive ? <NotAvailablePage title="My schedule" detail="The projects you are booked on, week by week." /> : <MockMyScheduleScreen />;
 }

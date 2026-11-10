@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PROJECTS } from '../../mock/studio-meridian';
 import { personName, type Task } from '../../api';
+import { isLive } from '../../api/live';
 import { useOverlays } from '../../app/overlays';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
@@ -13,7 +14,8 @@ import { useToast } from '../../ui/Toast';
 import { formatDate, formatHours } from '../../ui/format';
 import { PriorityDot, taskStatus } from './task-bits';
 
-const phaseId = (t: Task) => PROJECTS.find((p) => p.code === t.project)?.phases.find((x) => x.name === t.phase)?.id;
+/** The sample phase id for a mock task. Live mode never looks a project code up in the sample studio. */
+const phaseId = (t: Task) => (isLive ? undefined : PROJECTS.find((p) => p.code === t.project)?.phases.find((x) => x.name === t.phase)?.id);
 
 /** The 640 px task sheet from Project Tasks and My work. */
 export function TaskSheet({ task, onClose, onSubmitReview }: { task: Task | null; onClose: () => void; onSubmitReview?: (t: Task) => void }) {

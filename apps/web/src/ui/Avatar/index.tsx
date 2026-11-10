@@ -1,17 +1,20 @@
 import { Tooltip } from '../Tooltip';
 
 export const initials = (name: string) => {
-  const parts = name.trim().split(/\s+/);
+  // Skip words that start with punctuation, such as the "(DEMO)" suffix, so they never become "P(".
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const named = words.filter((w) => /^[\p{L}\p{N}]/u.test(w));
+  const parts = named.length ? named : words;
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] ?? '')).toUpperCase();
 };
 
-export type AvatarProps = { name: string; size?: 20 | 28 | 36; /** Overrides derived initials, for things that are not people. */ text?: string };
+export type AvatarProps = { name: string; size?: 20 | 28 | 32 | 36; /** Overrides derived initials, for things that are not people. */ text?: string };
 
 export function Avatar({ name, size = 28, text }: AvatarProps) {
   return <span className={`avatar avatar--${size}`} role="img" aria-label={name}>{text ?? initials(name)}</span>;
 }
 
-export type AvatarGroupProps = { names: string[]; size?: 20 | 28 | 36; max?: number; text?: (name: string) => string };
+export type AvatarGroupProps = { names: string[]; size?: 20 | 28 | 32 | 36; max?: number; text?: (name: string) => string };
 
 export function AvatarGroup({ names, size = 28, max = 3, text }: AvatarGroupProps) {
   const shown = names.slice(0, max);

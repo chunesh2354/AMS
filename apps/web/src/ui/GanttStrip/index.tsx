@@ -1,6 +1,6 @@
 import { Tooltip } from '../Tooltip';
 import { formatDate, formatMonth, parseISO } from '../format';
-import { toneClass, toneOf, type Status } from '../status-colors';
+import { markerOf, toneClass, toneOf, type Status } from '../status-colors';
 
 export type GanttPhase = { name: string; start: string; end: string; status: Status };
 export type GanttStripProps = { phases: GanttPhase[]; today?: string };
@@ -32,7 +32,7 @@ export function GanttStrip({ phases, today }: GanttStripProps) {
             <div className="gantt__track">
               <Tooltip text={`${p.name}: ${formatDate(p.start)} to ${formatDate(p.end)}, ${p.status}`}>
                 <span
-                  className={`gantt__bar ${toneClass(toneOf(p.status))}`} tabIndex={0} role="img"
+                  className={`gantt__bar gantt__bar--${markerOf(p.status)} ${toneClass(toneOf(p.status))}`} tabIndex={0} role="img"
                   aria-label={`${p.name}, ${formatDate(p.start)} to ${formatDate(p.end)}, ${p.status}`}
                   style={{ left: `${left}%`, width: `${width}%` }}
                 />

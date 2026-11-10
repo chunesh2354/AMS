@@ -10,7 +10,7 @@ export type AppShellProps = {
   children: ReactNode;
 };
 
-/** Fixed plane (painted by base.css), glass navigation, glass top bar, scrolling content with page gutter. */
+/** White page, hairline-edged navigation and top bar, scrolling content with page gutter. */
 export function AppShell({ interface: iface, sideNav, topBar, bottomBar, banner, children }: AppShellProps) {
   return (
     <div className={cx('shell', bottomBar && 'shell--tabs')} data-interface={iface}>

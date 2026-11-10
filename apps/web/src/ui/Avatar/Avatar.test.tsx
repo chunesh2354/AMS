@@ -4,6 +4,8 @@ import { Avatar, AvatarGroup, initials } from '.';
 
 it('uses two-letter initials', () => {
   expect(initials('Asha Rao')).toBe('AR');
+  expect(initials('Platform Admin (DEMO)')).toBe('PA');
+  expect(initials('Studio Meridian (DEMO)')).toBe('SM');
   render(<Avatar name="Asha Rao" />);
   expect(screen.getByRole('img', { name: 'Asha Rao' })).toHaveTextContent('AR');
 });

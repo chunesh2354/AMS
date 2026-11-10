@@ -1,0 +1,30 @@
+{
+  "name": "@ams/api",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "tsx watch src/dev/start.ts",
+    "start": "tsx src/dev/start.ts",
+    "start:prod": "NODE_ENV=production tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "reset": "tsx src/dev/reset.ts",
+    "platform-admin": "tsx src/dev/platform-admin.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/rate-limit": "^10.3.0",
+    "@node-rs/argon2": "^2.2.2",
+    "fastify": "^5.12.8",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "embedded-postgres": "^18.6.0-beta.19",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

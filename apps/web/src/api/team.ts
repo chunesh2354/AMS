@@ -2,7 +2,7 @@ import { AFFECTED_ASSIGNMENTS, EXPENSES, LEAVE_BALANCES, LEAVE_STRIP, MY_DAY_COU
 import { ALLOCATIONS } from '../mock/plan';
 import { LEAVE, TODAY } from '../mock/studio-meridian';
 import { TASKS } from '../mock/work';
-import { reply } from './access';
+import { sample, sampleSync, sampleView } from './access';
 import type { Expense, LeaveRequest, MyDay, Timesheet } from './types';
 
 export function getMyDay(viewerId: string): Promise<MyDay> {
@@ -10,11 +10,11 @@ export function getMyDay(viewerId: string): Promise<MyDay> {
   const today = tasks.filter((t) => t.due === TODAY);
   const extra = MY_DAY_COUNTS[viewerId] ?? { reviews: 0, missingDays: 0, returned: 0, leaveDecisions: 0 };
   const week = ALLOCATIONS.filter((a) => a.personId === viewerId && a.week === 0);
-  return reply({
+  return sampleView(() => ({
     today,
     counts: { dueToday: today.length, blocked: tasks.filter((t) => t.blocked).length, ...extra },
     allocation: week.map((a) => ({ label: a.phaseName, hours: a.hours })),
-  });
+  }));
 }
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEK_START = [26, 2, 9];
@@ -23,7 +23,7 @@ export function getTimesheet(viewerId: string, offset: number): Promise<Timeshee
   const i = offset + 1;
   const start = WEEK_START[i];
   const entry = TIMESHEETS[viewerId]?.[offset];
-  return reply({
+  return sampleView(() => ({
     offset,
     range: RANGE[i] ?? 'No data for this week',
     status: entry?.status ?? 'Not submitted',
@@ -33,10 +33,10 @@ export function getTimesheet(viewerId: string, offset: number): Promise<Timeshee
       const date = i === 0 && n > 31 ? n - 31 : n;
       return { key: label, label, date: String(date).padStart(2, '0'), scheduled: d < 5 ? 8 : 0 };
     }),
-  });
+  }));
 }
-export const getExpenses = (viewerId: string): Promise<Expense[]> => reply(viewerId === 'P04' ? EXPENSES : []);
-export const getLeaveBalances = () => reply(LEAVE_BALANCES);
-export const getLeaveStrip = () => reply(LEAVE_STRIP);
-export const getMyLeave = (viewerId: string): Promise<LeaveRequest[]> => reply(LEAVE.filter((l) => l.personId === viewerId));
-export const getAffectedAssignments = () => AFFECTED_ASSIGNMENTS;
+export const getExpenses = (viewerId: string): Promise<Expense[]> => sample(() => (viewerId === 'P04' ? EXPENSES : []), []);
+export const getLeaveBalances = () => sample(() => LEAVE_BALANCES, []);
+export const getLeaveStrip = () => sample(() => LEAVE_STRIP, []);
+export const getMyLeave = (viewerId: string): Promise<LeaveRequest[]> => sample(() => LEAVE.filter((l) => l.personId === viewerId), []);
+export const getAffectedAssignments = () => sampleSync(() => AFFECTED_ASSIGNMENTS, []);

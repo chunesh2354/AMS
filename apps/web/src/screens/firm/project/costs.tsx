@@ -21,6 +21,8 @@ import { StatusChip } from '../../../ui/StatusChip';
 import { TextField } from '../../../ui/TextField';
 import { useToast } from '../../../ui/Toast';
 import { formatDate, formatINR } from '../../../ui/format';
+import { isLive } from '../../../api/live';
+import { NotAvailable } from '../../../ui/NotAvailable';
 
 const billRows = (c: Cost) => [
   { label: 'Date', value: <span className="t-numeric">{formatDate(c.date)}</span> },
@@ -64,7 +66,7 @@ function AddCostSheet({ open, onClose, phases }: { open: boolean; onClose: () =>
   );
 }
 
-export function ProjectCostsScreen() {
+function MockProjectCostsScreen() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
   const { state, data, retry } = useResource(() => getCosts(id), [id]);
@@ -118,4 +120,9 @@ export function ProjectCostsScreen() {
       </Sheet>
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function ProjectCostsScreen() {
+  return isLive ? <><h2 className="t-h2">Costs</h2><div className="solid-panel"><NotAvailable detail="Expenses and consultant costs booked against this project." /></div></> : <MockProjectCostsScreen />;
 }

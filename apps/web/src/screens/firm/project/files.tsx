@@ -10,8 +10,10 @@ import { Select } from '../../../ui/Select';
 import { Sheet } from '../../../ui/Sheet';
 import { TextField } from '../../../ui/TextField';
 import { useToast } from '../../../ui/Toast';
+import { isLive } from '../../../api/live';
+import { NotAvailable } from '../../../ui/NotAvailable';
 
-export function ProjectFilesScreen() {
+function MockProjectFilesScreen() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
   const toast = useToast();
@@ -61,4 +63,9 @@ export function ProjectFilesScreen() {
       </Sheet>
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function ProjectFilesScreen() {
+  return isLive ? <><h2 className="t-h2">Files</h2><div className="solid-panel"><NotAvailable detail="Drawings, documents and their revisions for this project." /></div></> : <MockProjectFilesScreen />;
 }

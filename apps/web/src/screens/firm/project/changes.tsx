@@ -14,6 +14,8 @@ import { Sheet } from '../../../ui/Sheet';
 import { TextField } from '../../../ui/TextField';
 import { useToast } from '../../../ui/Toast';
 import { formatDate, formatGrouped, formatINR } from '../../../ui/format';
+import { isLive } from '../../../api/live';
+import { NotAvailable } from '../../../ui/NotAvailable';
 
 const signed = (v: number, text: string) => (v > 0 ? `+${text}` : text);
 
@@ -60,7 +62,7 @@ function ChangeSheet({ open, change, onClose, phases }: { open: boolean; change:
   );
 }
 
-export function ProjectChangesScreen() {
+function MockProjectChangesScreen() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
   const { state, data, retry } = useResource(() => getChanges(id), [id]);
@@ -88,4 +90,9 @@ export function ProjectChangesScreen() {
       <ChangeSheet open={sheet.open} change={sheet.change} onClose={() => setSheet({ open: false, change: null })} phases={getProjectPhaseOptions().find((p) => p.code === id)?.phases ?? []} />
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function ProjectChangesScreen() {
+  return isLive ? <><h2 className="t-h2">Changes</h2><div className="solid-panel"><NotAvailable detail="Change requests and the fee and scope changes they bring." /></div></> : <MockProjectChangesScreen />;
 }

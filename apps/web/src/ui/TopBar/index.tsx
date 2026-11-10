@@ -13,16 +13,17 @@ export type TopBarProps = {
   timer?: ReactNode;
   notifications: NotificationGroup[];
   onMarkAllRead?: () => void;
-  userName: string;
-  menuItems: MenuItem[];
+  /** The account menu. The app shell keeps it with the signed-in person in SideNav; pass both to show it here instead. */
+  userName?: string;
+  menuItems?: MenuItem[];
   defaultNotificationsOpen?: boolean;
 };
 
-/** Glass bar. The breadcrumb lives in PageHeader, not here. */
+/** Quiet white strip with a hairline: search, timer and notifications. The breadcrumb lives in PageHeader, not here. */
 export function TopBar({ onSearch, shortcut = 'Ctrl K', timer, notifications, onMarkAllRead, userName, menuItems, defaultNotificationsOpen }: TopBarProps) {
   const unread = notifications.flatMap((g) => g.items).filter((n) => n.unread).length;
   return (
-    <header className="topbar glass glass--bar">
+    <header className="topbar">
       <button type="button" className="topbar__search" onClick={onSearch} aria-keyshortcuts="Control+K Meta+K">
         <Search size={16} strokeWidth={1.5} aria-hidden />
         <span className="topbar__label">Search people, projects, actions</span>
@@ -43,9 +44,10 @@ export function TopBar({ onSearch, shortcut = 'Ctrl K', timer, notifications, on
         >
           <div className="notif">
             <div className="notif__head">
-              <h2 className="t-h3">Notifications</h2>
-              <button type="button" className="t-body-sm" style={{ color: 'var(--accent-text)' }} onClick={onMarkAllRead} disabled={!unread}>Mark all read</button>
+              <h2 className="notif__title">Notifications</h2>
+              <button type="button" className="notif__markall" onClick={onMarkAllRead} disabled={!unread}>Mark all read</button>
             </div>
+            {notifications.length === 0 && <p className="ink-2" style={{ padding: 'var(--s-4)' }}>No notifications</p>}
             {notifications.map((g) => (
               <section key={g.label} aria-label={g.label} style={{ paddingBottom: 'var(--s-2)' }}>
                 <h3 className="notif__group">{g.label}</h3>
@@ -59,12 +61,14 @@ export function TopBar({ onSearch, shortcut = 'Ctrl K', timer, notifications, on
             ))}
           </div>
         </Popover>
-        <Menu
-          label="Account"
-          placement="bottom-end"
-          items={menuItems}
-          trigger={(p) => <button {...p} type="button" className="topbar__avatar"><Avatar name={userName} /><span className="sr-only">, account menu</span></button>}
-        />
+        {userName && menuItems && (
+          <Menu
+            label="Account"
+            placement="bottom-end"
+            items={menuItems}
+            trigger={(p) => <button {...p} type="button" className="topbar__avatar"><Avatar name={userName} size={32} /><span className="sr-only">, account menu</span></button>}
+          />
+        )}
       </div>
     </header>
   );

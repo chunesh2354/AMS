@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { ChevronRight, TrendingDown, TrendingUp } from 'lucide-react';
 import { RestrictedCell } from '../RestrictedCell';
 import { formatGrouped } from '../format';
 import type { Tone } from '../status-colors';
@@ -13,6 +13,7 @@ export type QueueCardProps = {
 };
 
 export function QueueCard({ count, label, severity = 'neutral', trend, restricted, onClick }: QueueCardProps) {
+  const clickable = Boolean(onClick) && !restricted;
   const body = (
     <>
       <span className="queue__count">
@@ -24,10 +25,14 @@ export function QueueCard({ count, label, severity = 'neutral', trend, restricte
           </span>
         )}
       </span>
-      <span className="queue__label">{label}</span>
+      <span className="queue__label">
+        <span>{label}{clickable && <span className="sr-only">, open list</span>}</span>
+        {clickable && <ChevronRight className="queue__chevron" size={16} strokeWidth={1.5} aria-hidden />}
+      </span>
     </>
   );
   const cls = `queue glass tone-${severity}`;
   // A restricted card holds its own focusable lock, so it cannot also be a button.
-  return onClick && !restricted ? <button type="button" className={cls} onClick={onClick}>{body}</button> : <div className={cls}>{body}</div>;
+  // The name comes from the visible text (plus a hidden ", open list") so it always contains what is shown (WCAG 2.5.3).
+  return clickable ? <button type="button" className={cls} onClick={onClick}>{body}</button> : <div className={cls}>{body}</div>;
 }

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { getImportPreview, getIntegrations, getSettingsLists, type ImportRow } from '../../api';
 import { useResource } from '../../api/useResource';
-import { canUseSettings, useSession } from '../../app/session';
+import { isLive } from '../../api/live';
+import { canSeeRates, canUseSettings, useSession, type Viewer } from '../../app/session';
 import { FIRM_NAME, PEOPLE } from '../../mock/studio-meridian';
 import { SettingsLayout } from '../../layouts/SettingsLayout';
 import { WizardLayout } from '../../layouts/WizardLayout';
@@ -14,6 +15,7 @@ import { InlineAlert } from '../../ui/InlineAlert';
 import { ListStateBlock } from '../../ui/ListState';
 import { NumberField } from '../../ui/NumberField';
 import { PageHeader } from '../../ui/PageHeader';
+import { NotAvailable } from '../../ui/NotAvailable';
 import { PermissionDenied } from '../../ui/PermissionDenied';
 import { Select } from '../../ui/Select';
 import { Skeleton } from '../../ui/Skeleton';
@@ -21,15 +23,31 @@ import { StatusChip } from '../../ui/StatusChip';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { GoTo } from '../shared/go-to';
+import { AccountsSettings } from './accounts';
+import { ApprovalsSettings } from './approvals-settings';
+import { RatesSettings } from './rates';
 
 const SECTIONS = [
-  { key: 'profile', label: 'Profile' }, { key: 'permissions', label: 'Permissions' }, { key: 'calendars', label: 'Calendars' }, { key: 'work-categories', label: 'Work categories' },
-  { key: 'templates', label: 'Templates' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
+  { key: 'profile', label: 'Profile' }, { key: 'permissions', label: 'Permissions' }, { key: 'accounts', label: 'Accounts' }, { key: 'rates', label: 'Rates' }, { key: 'calendars', label: 'Calendars' }, { key: 'work-categories', label: 'Work categories' },
+  { key: 'templates', label: 'Templates' }, { key: 'approvals', label: 'Approvals' }, { key: 'approval-policies', label: 'Approval policies' }, { key: 'integrations', label: 'Integrations' }, { key: 'imports', label: 'Imports' },
 ];
+
+/**
+ * The settings sections this viewer may open. Rates goes to exactly those the server lets read the rate card
+ * (rates.bill.manage or rates.cost.view): finance gets Rates alone, operations gets everything but Rates.
+ */
+export function settingsSectionsFor(viewer: Viewer) {
+  const full = canUseSettings(viewer);
+  const rates = canSeeRates(viewer);
+  // Approvals saves through PUT /firm/approvals-settings, which needs firm.settings.manage firm-wide (operations only by grant).
+  const approvals = isLive ? viewer.capabilities?.['firm.settings.manage'] === 'firm' : full;
+  return SECTIONS.filter((s) => (s.key === 'rates' ? rates : s.key === 'approvals' ? approvals : full));
+}
 
 function Profile() {
   const toast = useToast();
-  const [name, setName] = useState(FIRM_NAME);
+  const { viewer } = useSession();
+  const [name, setName] = useState(() => (isLive ? viewer.firm?.name ?? '' : FIRM_NAME));
   const [office, setOffice] = useState('Bengaluru');
   const [prefix, setPrefix] = useState('INV-DEMO-');
   const [terms, setTerms] = useState('30');
@@ -171,20 +189,42 @@ function Imports() {
   );
 }
 
+/** Settings sections that read and save through the API. Every other section is not available yet in live mode. */
+const LIVE_SECTIONS = ['accounts', 'rates', 'approvals'];
+const NOT_YET: Record<string, string> = {
+  profile: 'Your studio name, office, invoice numbering and payment terms.',
+  permissions: 'The permission sets and what each one may do.',
+  calendars: 'Working weeks and public holidays for each office.',
+  'work-categories': 'The categories people log time against.',
+  templates: 'Project and phase templates for new projects.',
+  'approval-policies': 'Who approves time, expenses and leave, and when.',
+  integrations: 'Accounting, calendar and storage connections.',
+  imports: 'Bringing people, projects and clients in from a file.',
+};
+
 export function SettingsScreen() {
   const { viewer } = useSession();
   const section = useParams()['*'] ?? 'profile';
-  if (!canUseSettings(viewer)) return (<><PageHeader title="Settings" /><div className="solid-panel"><PermissionDenied capability="change firm settings" /></div></>);
-  const known = SECTIONS.find((s) => s.key === section);
-  if (!known) return <Navigate to="/firm/settings/profile" replace />;
+  const sections = settingsSectionsFor(viewer);
+  if (!sections.length) return (<><PageHeader title="Settings" /><div className="solid-panel"><PermissionDenied capability="change firm settings" /></div></>);
+  const known = sections.find((s) => s.key === section);
+  if (!known) return <Navigate to={`/firm/settings/${sections[0].key}`} replace />;
   return (
     <>
       <PageHeader title="Settings" />
-      <SettingsLayout label="Settings" items={SECTIONS.map((s) => ({ label: s.label, to: `/firm/settings/${s.key}` }))}>
-        {section === 'profile' && <Profile />}
-        {section === 'integrations' && <Integrations />}
-        {section === 'imports' && <Imports />}
-        {!['profile', 'integrations', 'imports'].includes(section) && <ListSection section={section} title={known.label} />}
+      <SettingsLayout label="Settings" items={sections.map((s) => ({ label: s.label, to: `/firm/settings/${s.key}` }))}>
+        {section === 'accounts' && <AccountsSettings />}
+        {section === 'rates' && <RatesSettings />}
+        {section === 'approvals' && <ApprovalsSettings />}
+        {isLive && !LIVE_SECTIONS.includes(section) && (
+          <div className="solid-panel settings__panel"><h2 className="t-h2">{known.label}</h2><NotAvailable detail={NOT_YET[section] ?? 'This section of your studio settings.'} /></div>
+        )}
+        {!isLive && <>
+          {section === 'profile' && <Profile />}
+          {section === 'integrations' && <Integrations />}
+          {section === 'imports' && <Imports />}
+          {!['profile', 'integrations', 'imports', 'accounts', 'rates', 'approvals'].includes(section) && <ListSection section={section} title={known.label} />}
+        </>}
       </SettingsLayout>
     </>
   );
