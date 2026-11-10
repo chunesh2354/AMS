@@ -17,6 +17,8 @@ import { useToast } from '../../ui/Toast';
 import { GoTo } from '../shared/go-to';
 import { MIN_PASSWORD } from '../auth/accept-invite';
 import { InlineAlert } from '../../ui/InlineAlert';
+import { NotAvailable } from '../../ui/NotAvailable';
+import { getProfile } from '../../api/live/people';
 
 function Personal({ name }: { name: string }) {
   const toast = useToast();
@@ -97,7 +99,7 @@ export function ChangePassword() {
   );
 }
 
-export function MyProfileScreen() {
+function MockMyProfileScreen() {
   const { viewer } = useSession();
   const [params] = useSearchParams();
   const raw = params.get('section');
@@ -131,6 +133,51 @@ export function MyProfileScreen() {
               </div>
             )
             : <Personal name={person.name} />}
+      </SettingsLayout>
+    </>
+  );
+}
+
+export function MyProfileScreen() {
+  return isLive ? <LiveMyProfileScreen /> : <MockMyProfileScreen />;
+}
+
+/**
+ * Live mode: work details from GET /people/:id/profile. Personal details and the working pattern have no API yet,
+ * so they say so instead of showing the sample studio's.
+ */
+function LiveMyProfileScreen() {
+  const { viewer } = useSession();
+  const [params] = useSearchParams();
+  const raw = params.get('section');
+  const section = raw === 'personal' || raw === 'password' ? raw : 'work';
+  const key = viewer.personId ?? viewer.id;
+  const { state, data: person, retry } = useResource(() => getProfile(key), [key]);
+  return (
+    <>
+      <PageHeader title={viewer.name} subtitle={viewer.title} lead={<Avatar name={viewer.name} size={36} />} />
+      <SettingsLayout label="My profile" items={[{ label: 'Work details', to: '?section=work', active: section === 'work' }, { label: 'Personal details', to: '?section=personal', active: section === 'personal' }, { label: 'Password', to: '?section=password', active: section === 'password' }]}>
+        {section === 'password' ? <ChangePassword />
+          : section === 'personal'
+            ? <div className="solid-panel settings__panel"><h2 className="t-h3">Personal details</h2><NotAvailable detail="Your display name, phone and emergency contact." /></div>
+            : state !== 'ready' || !person
+              ? <ListStateBlock state={state === 'ready' ? 'empty' : state} label="Your profile" onRetry={retry} capability="view your profile" empty={{ message: 'Your profile is not set up yet.', action: <GoTo to="/me/home">Back to My day</GoTo> }} />
+              : (
+                <div className="solid-panel settings__panel">
+                  <section className="stack-rows">
+                    <h2 className="t-h3">Work details</h2>
+                    <dl className="def-list">
+                      <dt>Email</dt><dd>{person.email}</dd>
+                      <dt>Manager</dt><dd className="dt__person">{person.manager ? <><Avatar name={person.manager} size={20} />{person.manager}</> : 'None'}</dd>
+                      <dt>Projects</dt><dd className="t-numeric">{person.projects.map((p) => p.code).join(', ') || 'None yet'}</dd>
+                    </dl>
+                  </section>
+                  <section className="stack-rows">
+                    <h2 className="t-h3">Working pattern</h2>
+                    <NotAvailable detail="Your working days and hours, and how they changed over time." />
+                  </section>
+                </div>
+              )}
       </SettingsLayout>
     </>
   );

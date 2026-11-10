@@ -3,6 +3,7 @@ import { Clock } from 'lucide-react';
 import { useResource } from '../../api/useResource';
 import { getMyHome, greetingFor, type LiveMyHome } from '../../api/live/me';
 import { rangeLabel } from '../../api/live/time';
+import { dueSoon, getMyTasksLive, phaseLabel, type MyTasks } from '../../api/live/tasks';
 import { useOverlays } from '../../app/overlays';
 import { useSession } from '../../app/session';
 import { QueueDashboard } from '../../layouts/QueueDashboard';
@@ -25,14 +26,15 @@ const timeOf = (iso: string, timeZone: string) => {
 };
 
 /**
- * Home in live mode: everything comes from GET /me/home. Tasks are not in this round, so the task list and its
- * queue cards are not shown; leave has no endpoint yet, so there is no Request leave action here.
+ * Home in live mode: everything comes from GET /me/home, and the tasks due soon from GET /me/tasks (a failure there
+ * leaves the rest of Home standing). Leave has no endpoint yet, so there is no Request leave action here.
  */
 export function LiveMyDayScreen() {
   const navigate = useNavigate();
   const { viewer } = useSession();
   const { openLogTime } = useOverlays();
   const { state, data, retry } = useResource(getMyHome, [viewer.id]);
+  const myTasks = useResource(getMyTasksLive, [viewer.id]);
   const first = viewer.name.split(' ')[0];
   const tz = data?.timeZone ?? viewer.firm?.timezone ?? 'Asia/Kolkata';
   const title = `${greetingFor(tz)}, ${first}`;
@@ -49,6 +51,7 @@ export function LiveMyDayScreen() {
     <QueueCard key="pending" count={data.pending.length} label="My requests pending" severity="neutral" />,
     ...(data.approvals == null ? [] : [<QueueCard key="approve" count={data.approvals} label="Waiting for me to approve" severity={data.approvals ? 'warn' : 'ok'} onClick={() => navigate('/firm/approvals')} />]),
     <QueueCard key="projects" count={data.projects.length} label="My projects" severity="neutral" onClick={() => navigate('/me/work')} />,
+    ...(myTasks.data ? [<QueueCard key="tasks" count={myTasks.data.overdue + myTasks.data.dueSoon} label="Tasks due this week" severity={myTasks.data.overdue ? 'warn' : 'neutral'} onClick={() => navigate('/me/work')} />] : []),
   ];
   return (
     <>
@@ -59,6 +62,7 @@ export function LiveMyDayScreen() {
           <>
             <WeekPanel data={data} />
             <ReturnedPanel data={data} />
+            {myTasks.data && <TasksDuePanel tasks={myTasks.data} />}
           </>
         )}
         side={(
@@ -162,6 +166,31 @@ function ProjectsPanel({ data }: { data: LiveMyHome }) {
           </ul>
         )
         : <p className="t-body-sm ink-2">You are not on any project team yet.</p>}
+    </section>
+  );
+}
+
+/** Open tasks overdue or due in the next seven days, soonest first. Nothing shows when none are. */
+function TasksDuePanel({ tasks }: { tasks: MyTasks }) {
+  const due = dueSoon(tasks.tasks, tasks.today);
+  if (!due.length) return null;
+  return (
+    <section className="solid-panel attention" aria-labelledby="tasks-due">
+      <div className="attention__head"><h2 id="tasks-due" className="t-h2">Tasks due soon</h2><span className="t-numeric ink-2">{due.length}</span></div>
+      <ul className="inbox__list">
+        {due.map((t) => (
+          <li key={t.id}>
+            <Link to="/me/work" className="attention__row">
+              {t.due_date! < tasks.today ? <StatusChip status="Overdue" size="sm" /> : <StatusChip status={t.status === 'To do' ? 'Planned' : t.status} label={t.status} size="sm" />}
+              <span className="attention__main">
+                <span className="attention__title">{t.title}</span>
+                <span className="t-body-sm ink-2">{t.project.code} {t.project.name} · {phaseLabel(t)}</span>
+              </span>
+              <span className="t-numeric">{formatDate(t.due_date!)}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

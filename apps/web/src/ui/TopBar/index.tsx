@@ -47,6 +47,7 @@ export function TopBar({ onSearch, shortcut = 'Ctrl K', timer, notifications, on
               <h2 className="notif__title">Notifications</h2>
               <button type="button" className="notif__markall" onClick={onMarkAllRead} disabled={!unread}>Mark all read</button>
             </div>
+            {notifications.length === 0 && <p className="ink-2" style={{ padding: 'var(--s-4)' }}>No notifications</p>}
             {notifications.map((g) => (
               <section key={g.label} aria-label={g.label} style={{ paddingBottom: 'var(--s-2)' }}>
                 <h3 className="notif__group">{g.label}</h3>

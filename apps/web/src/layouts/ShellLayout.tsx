@@ -16,10 +16,12 @@ import { FIRM_NAV, TEAM_NAV, firmNav, firmTabs, teamTabs } from '../app/nav';
 import { VIEWERS, canUseFirm, useSession, useTimer, type Viewer } from '../app/session';
 import { OverlaysProvider, useOverlays } from '../app/overlays';
 import { getNotifications } from '../api';
-import { CONNECTED_ROUTES, SAMPLE_DATA_NOTICE, apiFetch, failureMessage, isLive, signOut, type ListResponse } from '../api/live';
+import { apiFetch, failureMessage, isLive, signOut, type ListResponse } from '../api/live';
 import { pendingApprovalCount } from '../api/live/approvals';
 import { approvalsBadge } from '../api/live/shell';
 import { stopTimer } from '../api/live/time';
+import { getLiveProjects } from '../api/live/projects';
+import { getDirectory } from '../api/live/people';
 import { FIRM_NAME } from '../mock/studio-meridian';
 
 const isMac = /mac/i.test(navigator.platform);
@@ -44,7 +46,6 @@ function groupNotifications(rows: LiveNotification[], now = new Date()): Notific
 const PHONE_BANNER_KEY = 'phone-banner-dismissed';
 const PHONE_OK_ROUTES = ['/firm/overview', '/firm/approvals'];
 const readBannerDismissed = () => { try { return localStorage.getItem(PHONE_BANNER_KEY) === '1'; } catch { return false; } };
-const isConnectedRoute = (pathname: string) => CONNECTED_ROUTES.some((path) => matchPath({ path, end: true }, pathname));
 
 /** The brand in the side nav: the signed-in firm in live mode (never the sample studio), the sample studio in the mock. */
 export const brandFor = (viewer: Viewer, live = isLive) => (live ? viewer.firm?.name ?? '' : FIRM_NAME);
@@ -101,6 +102,25 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
   };
 
   const firmAllowed = canUseFirm(viewer);
+  // Live: the palette searches this firm's real projects and people, loaded the first time it opens.
+  // A list the viewer may not read is left out, so the palette falls back to navigation only.
+  const [records, setRecords] = useState<{ projects: PaletteAction[]; people: PaletteAction[] } | null>(null);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  useEffect(() => {
+    if (!isLive || !paletteOpen || records || !firmAllowed) return;
+    let current = true;
+    setRecordsLoading(true);
+    Promise.all([getLiveProjects().catch(() => []), getDirectory('active').catch(() => [])]).then(([projects, people]) => {
+      if (!current) return;
+      setRecords({
+        projects: projects.map((p) => ({ id: `prj:${p.code}`, label: `${p.code} ${p.name}`, group: 'Projects', meta: p.status, onSelect: () => navigate(`/firm/projects/${encodeURIComponent(p.code)}`) })),
+        people: people.map((p) => ({ id: `person:${p.id}`, label: p.name, group: 'People', meta: p.title || undefined, onSelect: () => navigate(`/firm/people/${encodeURIComponent(p.ref)}`) })),
+      });
+      setRecordsLoading(false);
+    });
+    return () => { current = false; };
+  }, [paletteOpen, records, firmAllowed, navigate]);
+
   const actions = useMemo<PaletteAction[]>(() => {
     const go = (to: string) => () => navigate(to);
     const navItems = [...(firmAllowed ? firmSections : []), ...TEAM_NAV].flatMap((s) => s.items);
@@ -120,8 +140,9 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
         { id: 'prj2', label: 'PRJ-02 Orchard Commercial Block', group: 'Projects', meta: 'Active', onSelect: go('/firm/projects/PRJ-02') },
         { id: 'prj3', label: 'PRJ-03 Heritage Cafe Refit', group: 'Projects', meta: 'On hold', onSelect: go('/firm/projects/PRJ-03') },
       ] : []),
+      ...(isLive && records ? [...records.people, ...records.projects] : []),
     ];
-  }, [navigate, firmAllowed, firmSections, openLogTime, openLeave]);
+  }, [navigate, firmAllowed, firmSections, openLogTime, openLeave, records]);
 
   // Light only for now: the theme choice is gone from the account menu (session.tsx forces light).
   const menuItems: MenuItem[] = [
@@ -138,7 +159,6 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
 
   const tabs = iface === 'firm' && firmAllowed ? firmTabs(navigate, firmSections) : teamTabs(navigate);
   const showFirmNav = iface === 'firm' && firmAllowed;
-  const sampleBanner = isLive && !isConnectedRoute(pathname) ? <InlineAlert variant="warn" title={SAMPLE_DATA_NOTICE} /> : undefined;
   const phoneBanner = phone && showFirmNav && !bannerDismissed && !PHONE_OK_ROUTES.some((path) => matchPath({ path, end: false }, pathname))
     ? <InlineAlert variant="info" title="Best on a larger screen" dismissible onDismiss={dismissBanner}>Overview and Approvals work here. Everything else is easier on a bigger display.</InlineAlert>
     : undefined;
@@ -174,12 +194,12 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
             }
           />
         }
-        banner={sampleBanner && phoneBanner ? <>{sampleBanner}{phoneBanner}</> : sampleBanner ?? phoneBanner}
+        banner={phoneBanner}
         bottomBar={<BottomTabBar label={showFirmNav ? 'Firm' : 'Team'} items={tabs} />}
       >
         <Outlet />
       </AppShell>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={actions} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={actions} loading={isLive && recordsLoading} />
     </>
   );
 }

@@ -58,12 +58,16 @@ test('1. staff login, my time, edit persists, submit locks', async ({ page }) =>
   await shot(page, 'my-time');
 });
 
-test('6. unconnected route shows sample banner; sign out requires login', async ({ page }) => {
+test('6. an unconnected route says it is not available yet, never sample data; sign out requires login', async ({ page }) => {
   await login(page, 'p10');
   await expect(page).toHaveURL(/\/firm\/overview/);
-  await page.goto('/firm/workload'); // People is connected now; Workload is still sample data
-  await expect(page.getByText('Sample data. This screen is not connected to the database yet.')).toBeVisible();
-  await shot(page, 'sample-banner');
+  // Workload has no API yet. Live mode shows an honest empty state instead of the sample studio (no banner, no sample rows).
+  await page.goto('/firm/workload');
+  await expect(page.getByRole('heading', { name: 'Workload' })).toBeVisible();
+  await expect(page.getByRole('status').getByText('Not available yet')).toBeVisible();
+  await expect(page.getByText('Sample data. This screen is not connected to the database yet.')).toHaveCount(0);
+  await expect(page.getByRole('table')).toHaveCount(0);
+  await shot(page, 'not-available');
   // The redesign puts Sign out at the foot of the side nav instead of in an account menu.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login/);

@@ -14,6 +14,8 @@ import { useToast } from '../../ui/Toast';
 import { formatDate } from '../../ui/format';
 import { CreateProjectSheet } from './create-project-sheet';
 import { GoTo } from '../shared/go-to';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
 type PhaseRow = { name: string; start: string; end: string; hours: number };
 type FeeRow = { name: string; method: string; amount: number };
@@ -35,7 +37,7 @@ const milestoneColumns: Column<MilestoneRow>[] = [
   { key: 'amount', header: 'Amount', type: 'money', value: (m) => m.amount, total: (r) => r.reduce((s, x) => s + x.amount, 0) },
 ];
 
-export function ProposalScreen() {
+function MockProposalScreen() {
   const { id = '' } = useParams();
   const toast = useToast();
   const { state, data: p, retry } = useResource(() => getProposal(id), [id]);
@@ -115,4 +117,9 @@ export function ProposalScreen() {
       <CreateProjectSheet open={creating} onClose={() => setCreating(false)} people={people.data ?? []} proposal={p} />
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function ProposalScreen() {
+  return isLive ? <NotAvailablePage title="Proposal" detail="The proposal, its fee and its versions, once proposals are connected." /> : <MockProposalScreen />;
 }

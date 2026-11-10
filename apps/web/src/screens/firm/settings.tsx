@@ -15,6 +15,7 @@ import { InlineAlert } from '../../ui/InlineAlert';
 import { ListStateBlock } from '../../ui/ListState';
 import { NumberField } from '../../ui/NumberField';
 import { PageHeader } from '../../ui/PageHeader';
+import { NotAvailable } from '../../ui/NotAvailable';
 import { PermissionDenied } from '../../ui/PermissionDenied';
 import { Select } from '../../ui/Select';
 import { Skeleton } from '../../ui/Skeleton';
@@ -188,6 +189,19 @@ function Imports() {
   );
 }
 
+/** Settings sections that read and save through the API. Every other section is not available yet in live mode. */
+const LIVE_SECTIONS = ['accounts', 'rates', 'approvals'];
+const NOT_YET: Record<string, string> = {
+  profile: 'Your studio name, office, invoice numbering and payment terms.',
+  permissions: 'The permission sets and what each one may do.',
+  calendars: 'Working weeks and public holidays for each office.',
+  'work-categories': 'The categories people log time against.',
+  templates: 'Project and phase templates for new projects.',
+  'approval-policies': 'Who approves time, expenses and leave, and when.',
+  integrations: 'Accounting, calendar and storage connections.',
+  imports: 'Bringing people, projects and clients in from a file.',
+};
+
 export function SettingsScreen() {
   const { viewer } = useSession();
   const section = useParams()['*'] ?? 'profile';
@@ -199,13 +213,18 @@ export function SettingsScreen() {
     <>
       <PageHeader title="Settings" />
       <SettingsLayout label="Settings" items={sections.map((s) => ({ label: s.label, to: `/firm/settings/${s.key}` }))}>
-        {section === 'profile' && <Profile />}
-        {section === 'integrations' && <Integrations />}
-        {section === 'imports' && <Imports />}
         {section === 'accounts' && <AccountsSettings />}
         {section === 'rates' && <RatesSettings />}
         {section === 'approvals' && <ApprovalsSettings />}
-        {!['profile', 'integrations', 'imports', 'accounts', 'rates', 'approvals'].includes(section) && <ListSection section={section} title={known.label} />}
+        {isLive && !LIVE_SECTIONS.includes(section) && (
+          <div className="solid-panel settings__panel"><h2 className="t-h2">{known.label}</h2><NotAvailable detail={NOT_YET[section] ?? 'This section of your studio settings.'} /></div>
+        )}
+        {!isLive && <>
+          {section === 'profile' && <Profile />}
+          {section === 'integrations' && <Integrations />}
+          {section === 'imports' && <Imports />}
+          {!['profile', 'integrations', 'imports', 'accounts', 'rates', 'approvals'].includes(section) && <ListSection section={section} title={known.label} />}
+        </>}
       </SettingsLayout>
     </>
   );

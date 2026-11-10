@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { getAffectedAssignments } from '../../api';
 import { failureMessage, isLive } from '../../api/live';
+import { todayIn } from '../../api/live/time';
 import { announceLeaveChanged, liveMyLeave, submitLeave, type LiveLeaveType } from '../../api/live/leave';
 import { TODAY } from '../../mock/studio-meridian';
 import { Button } from '../../ui/Button';
@@ -40,7 +41,7 @@ export function RequestLeaveSheet({ open, onClose }: { open: boolean; onClose: (
   useEffect(() => {
     if (!open || !isLive) return;
     let on = true;
-    liveMyLeave().then((d) => { if (on) { setLive({ types: d.types, today: d.today }); setType(d.types[0]?.id ?? null); } }, () => { if (on) setLive({ types: [], today: TODAY }); });
+    liveMyLeave().then((d) => { if (on) { setLive({ types: d.types, today: d.today }); setType(d.types[0]?.id ?? null); } }, () => { if (on) setLive({ types: [], today: todayIn() }); });
     return () => { on = false; };
   }, [open]);
 
@@ -49,7 +50,7 @@ export function RequestLeaveSheet({ open, onClose }: { open: boolean; onClose: (
   const valid = !!range.from && !!range.to && days > 0 && !!type;
   // No endpoint lists affected assignments yet: live mode leaves the section out rather than show sample data.
   const affected = valid && !isLive ? getAffectedAssignments() : [];
-  const today = isLive ? live?.today ?? TODAY : TODAY;
+  const today = isLive ? live?.today ?? todayIn() : TODAY;
   const options = isLive ? (live?.types ?? []).map((t) => ({ value: t.id, label: t.name })) : TYPES.map((t) => ({ value: t, label: t }));
   const submit = () => {
     if (!valid) { setTried(true); return; }

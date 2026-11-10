@@ -18,6 +18,8 @@ import { StatusChip } from '../../ui/StatusChip';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { formatDate, formatINR } from '../../ui/format';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
 const projects = getProjectPhaseOptions();
 type Row = { id: number; phase: string | null; amount: number | null };
@@ -78,7 +80,7 @@ function NewExpenseSheet({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-export function MyExpensesScreen() {
+function MockMyExpensesScreen() {
   const { viewer } = useSession();
   const { state, data, retry } = useResource(() => getExpenses(viewer.id), [viewer.id]);
   const [adding, setAdding] = useState(false);
@@ -111,4 +113,9 @@ export function MyExpensesScreen() {
       <NewExpenseSheet open={adding} onClose={() => setAdding(false)} />
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function MyExpensesScreen() {
+  return isLive ? <NotAvailablePage title="My expenses" detail="Expenses you claim and where each one stands." /> : <MockMyExpensesScreen />;
 }

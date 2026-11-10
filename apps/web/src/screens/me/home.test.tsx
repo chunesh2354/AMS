@@ -143,8 +143,9 @@ describe('live Home', () => {
 });
 
 describe('live Work', () => {
-  it('lists my projects with phases, status, dates and my hours this month, and no tasks', async () => {
-    handler = base(STAFF, (url) => (url.endsWith('/me/work') ? { status: 200, body: WORK } : undefined));
+  it('lists my projects with phases, status, dates and my hours this month, and my tasks from the API only', async () => {
+    handler = base(STAFF, (url) => (url.endsWith('/me/work') ? { status: 200, body: WORK }
+      : url.endsWith('/me/tasks') ? { status: 200, body: { ...list([]).body, today: '2026-11-06', overdue: 0, due_soon: 0 } } : undefined));
     open('/me/work');
     const table = await screen.findByRole('table');
     expect(within(table).getByText('HW-01 Harbour Pavilion · Contributor · Active · Port Trust')).toBeInTheDocument();
@@ -154,9 +155,11 @@ describe('live Work', () => {
     expect(within(table).getByText('19.50 h')).toBeInTheDocument();
     expect(within(table).getAllByText('Not set').length).toBe(2);
     expect(screen.getByText('2 projects · 34.50 h in Nov 2026')).toBeInTheDocument();
-    // No task list or board in this round, and no sample banner.
+    // My tasks reads GET /me/tasks (empty here): no sample task, no sample board, and no sample banner.
+    expect(await screen.findByText('No open tasks are assigned to you.')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'View' })).toBeNull();
-    expect(screen.queryByText(/tasks/)).toBeNull();
+    expect(screen.queryByText(/Stair section/)).toBeNull();
+    expect(screen.queryByRole('region', { name: /^(Overdue|Today|This week|Later),/ })).toBeNull();
     expect(screen.queryByText(SAMPLE_DATA_NOTICE)).toBeNull();
   });
 

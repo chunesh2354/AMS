@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-live/
+dist-live.*/
 storybook-static/
 test-results/
 playwright-report/

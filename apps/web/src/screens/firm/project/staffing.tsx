@@ -11,6 +11,7 @@ import { InlineAlert } from '../../../ui/InlineAlert';
 import { ListStateBlock } from '../../../ui/ListState';
 import { PersonPicker } from '../../../ui/PersonPicker';
 import { PlannerLegend } from '../../../ui/PlannerGrid';
+import { NotAvailable } from '../../../ui/NotAvailable';
 import { Select } from '../../../ui/Select';
 import { Skeleton } from '../../../ui/Skeleton';
 import { useToast } from '../../../ui/Toast';
@@ -19,15 +20,27 @@ import { GoTo } from '../../shared/go-to';
 
 export function ProjectStaffingScreen() {
   const { id = '' } = useParams();
+  if (isLive) {
+    return (
+      <>
+        <ProjectTeamPanel code={id} />
+        <h2 className="t-h2">Staffing plan</h2>
+        <div className="solid-panel"><NotAvailable detail="Weekly hours booked for each person on this project, against their capacity." /></div>
+      </>
+    );
+  }
+  return <MockStaffingPlanner id={id} />;
+}
+
+/** The mock build's staffing planner. Live mode has no allocations API yet, so it never renders there. */
+function MockStaffingPlanner({ id }: { id: string }) {
   const planner = usePlanner(id);
-  const team = isLive ? <ProjectTeamPanel code={id} /> : null;
-  if (planner.state === 'loading') return <>{team}<Skeleton kind="planner" /></>;
+  if (planner.state === 'loading') return <Skeleton kind="planner" />;
   if (planner.state !== 'ready') {
-    return <>{team}<ListStateBlock state={planner.state} label="Staffing" onRetry={planner.retry} capability="view project staffing" empty={{ message: 'Nobody is allocated to this project yet.', action: <GoTo to="/firm/workload">Open Workload</GoTo> }} /></>;
+    return <ListStateBlock state={planner.state} label="Staffing" onRetry={planner.retry} capability="view project staffing" empty={{ message: 'Nobody is allocated to this project yet.', action: <GoTo to="/firm/workload">Open Workload</GoTo> }} />;
   }
   return (
     <>
-      {team}
       <PlannerLayout
         tools={<>{planner.period}{planner.zoomControl}<span style={{ marginLeft: 'auto' }}>{planner.publishButton}</span></>}
         grid={planner.grid} foot={<PlannerLegend hint={PLANNER_HINT} />}

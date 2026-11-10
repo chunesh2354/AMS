@@ -7,7 +7,10 @@ export const isLive = import.meta.env.VITE_LIVE === '1';
 const API_BASE = '/api/v1';
 const LOGIN_PATH = '/login';
 
-/** Routes backed by the database in live mode. Every other route shows the sample data banner. */
+/**
+ * Routes backed by the database in live mode. Every other route renders its page title with the
+ * "Not available yet" state (ui/NotAvailable) in live mode: never sample rows, so no sample data banner either.
+ */
 export const CONNECTED_ROUTES = [
   '/firm/overview',
   '/firm/projects',
@@ -15,6 +18,7 @@ export const CONNECTED_ROUTES = [
   '/firm/projects/:id/phases',
   '/firm/projects/:id/time',
   '/firm/projects/:id/billing',
+  '/firm/projects/:id/tasks',
   '/firm/approvals',
   '/firm/billing',
   '/firm/receivables',
@@ -28,6 +32,7 @@ export const CONNECTED_ROUTES = [
   '/firm/people/:id',
 ] as const;
 
+/** The banner unconnected routes used to show over sample rows. Live mode no longer shows sample rows or this banner. */
 export const SAMPLE_DATA_NOTICE = 'Sample data. This screen is not connected to the database yet.';
 
 export class ApiFailure extends Error {

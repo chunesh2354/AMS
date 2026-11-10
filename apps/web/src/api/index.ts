@@ -2,7 +2,7 @@ import {
   AGEING, APPROVALS, ATTENTION, ATTENTION_FENCED, AVAILABILITY, CONTRIBUTION, LEAVE, NOTIFICATIONS, PEOPLE, PERSON_ACTIVITY, PROJECTS,
   PROJECT_ATTENTION, QUEUES, READY_TO_BILL, UTILIZATION, WORKING_PATTERNS, defaultAvailability,
 } from '../mock/studio-meridian';
-import { fence, hasFinanceAccess, reply, type ViewerRef } from './access';
+import { fence, hasFinanceAccess, sample, sampleSync, sampleView, type ViewerRef } from './access';
 import type { ActivityEvent, Approval, AttentionItem, Fenced, LeaveRequest, NotificationGroupData, Overview, Person, ProjectView, WeekAvailability } from './types';
 
 export * from './types';
@@ -19,33 +19,34 @@ export { canSeeRatesTab, hasFinanceAccess, type ViewerRef } from './access';
 
 export function getOverview(viewer: ViewerRef): Promise<Overview> {
   const finance = hasFinanceAccess(viewer);
-  return reply({
+  return sampleView(() => ({
     queues: QUEUES.map((q) => ({ ...q, restricted: q.key === 'overdue' ? !finance : undefined })),
     attention: ATTENTION.map((a) => (!finance && ATTENTION_FENCED[a.id] ? { ...a, detail: ATTENTION_FENCED[a.id] } : a)),
     readyToBill: fence(finance, READY_TO_BILL),
     ageing: fence(finance, AGEING),
     utilization: UTILIZATION,
-  });
+  }));
 }
 
-export const getPeople = (): Promise<Person[]> => reply(PEOPLE);
-export const getPerson = (id: string): Promise<Person | null> => reply(PEOPLE.find((p) => p.id === id) ?? null);
-export const personName = (id: string | null) => PEOPLE.find((p) => p.id === id)?.name ?? 'None';
+export const getPeople = (): Promise<Person[]> => sample(() => PEOPLE, []);
+export const getPerson = (id: string): Promise<Person | null> => sample(() => PEOPLE.find((p) => p.id === id) ?? null, null);
+/** A sample person's name. Live mode has no sample people: a reference code there is never read as one. */
+export const personName = (id: string | null) => sampleSync(() => PEOPLE.find((p) => p.id === id)?.name ?? 'None', id ? 'Unknown person' : 'None');
 
 export function getAvailability(id: string): Promise<WeekAvailability[]> {
   const p = PEOPLE.find((x) => x.id === id);
-  return reply(AVAILABILITY[id] ?? (p ? defaultAvailability(p) : []));
+  return sample(() => AVAILABILITY[id] ?? (p ? defaultAvailability(p) : []), []);
 }
 export const getWorkingPattern = (id: string) => {
   const p = PEOPLE.find((x) => x.id === id);
-  return reply(WORKING_PATTERNS[id] ?? [{ from: '2026-04-01', to: null, label: `${p?.daysPerWeek ?? 5} days, ${p?.hoursPerWeek ?? 40} h`, detail: 'Current working pattern' }]);
+  return sample(() => WORKING_PATTERNS[id] ?? [{ from: '2026-04-01', to: null, label: `${p?.daysPerWeek ?? 5} days, ${p?.hoursPerWeek ?? 40} h`, detail: 'Current working pattern' }], []);
 };
-export const getPersonLeave = (id: string): Promise<LeaveRequest[]> => reply(LEAVE.filter((l) => l.personId === id));
-export const getPersonActivity = (id: string): Promise<ActivityEvent[]> => reply(PERSON_ACTIVITY[id] ?? []);
+export const getPersonLeave = (id: string): Promise<LeaveRequest[]> => sample(() => LEAVE.filter((l) => l.personId === id), []);
+export const getPersonActivity = (id: string): Promise<ActivityEvent[]> => sample(() => PERSON_ACTIVITY[id] ?? [], []);
 export const getRates = (id: string, viewer: ViewerRef): Promise<{ cost: Fenced<number | null>; bill: Fenced<number | null> }> => {
   const p = PEOPLE.find((x) => x.id === id);
   const finance = hasFinanceAccess(viewer);
-  return reply({ cost: fence(finance, p?.costRate ?? null), bill: fence(finance, p?.billRate ?? null) });
+  return sample(() => ({ cost: fence(finance, p?.costRate ?? null), bill: fence(finance, p?.billRate ?? null) }), { cost: fence(finance, null), bill: fence(finance, null) });
 };
 
 const toView = (code: string, viewer: ViewerRef): ProjectView | null => {
@@ -54,10 +55,10 @@ const toView = (code: string, viewer: ViewerRef): ProjectView | null => {
   const finance = hasFinanceAccess(viewer);
   return { ...p, contribution: fence(finance, CONTRIBUTION[code]), entitlement: { restricted: false, value: p.entitlement } };
 };
-export const getProjects = (viewer: ViewerRef): Promise<ProjectView[]> => reply(PROJECTS.map((p) => toView(p.code, viewer)!));
-export const getProject = (code: string, viewer: ViewerRef): Promise<ProjectView | null> => reply(toView(code, viewer));
+export const getProjects = (viewer: ViewerRef): Promise<ProjectView[]> => sample(() => PROJECTS.map((p) => toView(p.code, viewer)!), []);
+export const getProject = (code: string, viewer: ViewerRef): Promise<ProjectView | null> => sample(() => toView(code, viewer), null);
 export const getProjectAttention = (code: string, viewer: ViewerRef): Promise<AttentionItem[]> =>
-  reply((PROJECT_ATTENTION[code] ?? []).map((a) => (!hasFinanceAccess(viewer) && ATTENTION_FENCED[a.id] ? { ...a, detail: ATTENTION_FENCED[a.id] } : a)));
+  sample(() => (PROJECT_ATTENTION[code] ?? []).map((a) => (!hasFinanceAccess(viewer) && ATTENTION_FENCED[a.id] ? { ...a, detail: ATTENTION_FENCED[a.id] } : a)), []);
 
-export const getApprovals = (): Promise<Approval[]> => reply(APPROVALS);
-export const getNotifications = (): NotificationGroupData[] => NOTIFICATIONS;
+export const getApprovals = (): Promise<Approval[]> => sample(() => APPROVALS, []);
+export const getNotifications = (): NotificationGroupData[] => sampleSync(() => NOTIFICATIONS, []);

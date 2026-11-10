@@ -20,6 +20,8 @@ import { StatusChip } from '../../ui/StatusChip';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
 import { formatDate, formatINR } from '../../ui/format';
+import { isLive } from '../../api/live';
+import { NotAvailablePage } from '../../ui/NotAvailable';
 
 const STAGES: OpportunityStage[] = ['New', 'Qualified', 'Proposal', 'Won', 'Lost', 'On hold'];
 
@@ -67,7 +69,7 @@ function AddOpportunitySheet({ open, onClose, people, onAdd }: { open: boolean; 
   );
 }
 
-export function PipelineScreen() {
+function MockPipelineScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
@@ -117,4 +119,9 @@ export function PipelineScreen() {
       />
     </>
   );
+}
+
+/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+export function PipelineScreen() {
+  return isLive ? <NotAvailablePage title="Pipeline" detail="Opportunities and proposals, from first lead to signed contract." /> : <MockPipelineScreen />;
 }

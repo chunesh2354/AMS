@@ -103,7 +103,8 @@ describe('live projects list', () => {
     const row = toProjectRow(PROJECT as never);
     expect(row.pmId).toBe('P02');
     expect(pmNameOf(row)).toBe('Nila Varma');
-    expect(pmNameOf({ ...row, pmName: undefined })).toBe('Vikram Nair'); // the mock lookup, for mock rows only
+    // A row without a name never falls back to the sample studio in live mode (the mock lookup is pinned in projects.test.tsx).
+    expect(pmNameOf({ ...row, pmName: undefined })).toBe('Unknown person');
   });
 });
 
@@ -111,7 +112,8 @@ describe('live billing', () => {
   it('shows the preparer name the server sends, as is', () => {
     expect(preparedByName({ preparedBy: 'Mira Iyer' }, true)).toBe('Mira Iyer');
     expect(preparedByName({ preparedBy: '' }, true)).toBe('Not set');
-    expect(preparedByName({ preparedBy: 'P02' }, false)).toBe('Vikram Nair');
+    // Even the mock path cannot read a sample name while the build is live.
+    expect(preparedByName({ preparedBy: 'P02' }, false)).toBe('Unknown person');
   });
 });
 

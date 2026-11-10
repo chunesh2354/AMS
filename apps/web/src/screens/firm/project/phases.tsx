@@ -31,6 +31,9 @@ const monthYear = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso
 const longDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
 
 /** One plain sentence about the worst overrun and where hours could come from. Live mode has no budget revision yet, so it states the overrun only. */
+/** Live mode: the real date, never the sample studio's TODAY. */
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
 function overrunNote(phases: Phase[], advise = true): string | null {
   const over = phases.filter((p) => forecast(p) > p.budget).sort((a, b) => (forecast(b) - b.budget) - (forecast(a) - a.budget))[0];
   if (!over) return null;
@@ -120,8 +123,8 @@ function EditPhaseSheet({ phase, onClose, onSave, people, progressOnly = false, 
           <FormSection columns={2}>
             {!progressOnly && (
               <>
-                <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={TODAY} />
-                <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={TODAY} />
+                <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={isLive ? todayIso() : TODAY} />
+                <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={isLive ? todayIso() : TODAY} />
               </>
             )}
             <NumberField label="ETC (h)" value={etc} onChange={(e) => setEtc(e.target.value)} error={tried && badEtc ? 'Enter hours, zero or more' : undefined} />
@@ -146,7 +149,7 @@ export function ProjectPhasesScreen() {
   const people = useResource(isLive ? noPeople : getPeople, []);
   const livePeople = isLive ? (project as ProjectTabView | null)?.people ?? {} : {};
   const ownerName = (ref: string) => (isLive ? nameOf(livePeople, ref) : personName(ref));
-  const today = isLive ? new Date().toISOString().slice(0, 10) : TODAY;
+  const today = isLive ? todayIso() : TODAY;
   const [saving, setSaving] = useState(false);
   const saveLive = async (p: Phase) => {
     setSaving(true);
