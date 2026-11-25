@@ -33,4 +33,7 @@ export function parseDuration(text: string): number | null {
   return null;
 }
 export const formatDuration = (min: number) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
-export const formatElapsed = (sec: number) => `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}`;
+/** A running timer's elapsed time: hh:mm under a day, then days and hours, so a forgotten timer does not read as 358:00. */
+export const formatElapsed = (sec: number) => (sec >= 86400
+  ? `${Math.floor(sec / 86400)} d ${Math.floor((sec % 86400) / 3600)} h`
+  : `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}`);

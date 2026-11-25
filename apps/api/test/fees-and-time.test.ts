@@ -284,9 +284,62 @@ describe('dates follow the firm timezone', () => {
       `insert into timer (firm_id, person_id, project_id, phase_id, started_at, created_by) values ($1,$2,$3,$4,'2026-03-01T23:30:00Z',$2)`,
       [f.firmId, f.id('P04'), pid, cd],
     );
-    const r = await f.call('P04', 'POST', '/timers/stop');
+    // Months old, so the person says how many hours to keep; they still land on the IST day the timer started.
+    const asked = await f.call('P04', 'POST', '/timers/stop');
+    expect(asked.status).toBe(409);
+    expect(asked.body.error).toMatchObject({ code: 'TIMER_NEEDS_HOURS', service_date: '2026-03-02' });
+    const r = await f.call('P04', 'POST', '/timers/stop', { duration_hours: 2 });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect((await f.owner.query('select service_date from time_entry where id = $1', [r.body.time_entry_id])).rows[0].service_date).toBe('2026-03-02');
+  });
+
+  it('a forgotten timer on a full day can still be stopped: asked for hours, kept, or discarded', async () => {
+    await create('FT-71', { members: [{ person_id: f.id('P04') }] });
+    const cd = await phaseOf('FT-71', 'CD');
+    const pid = (await f.owner.query(`select id from project where code = 'FT-71'`)).rows[0].id;
+    const startTimer = (at: string) => f.owner.query(
+      `insert into timer (firm_id, person_id, project_id, phase_id, started_at, created_by) values ($1,$2,$3,$4,$5,$2)`, [f.firmId, f.id('P04'), pid, cd, at],
+    );
+    const running = async () => (await f.owner.query('select count(*)::int n from timer where person_id = $1 and ended_at is null', [f.id('P04')])).rows[0].n;
+    // 2026-04-10 already holds 20 h; the timer started that morning IST and was left running for days.
+    expect((await f.call('P04', 'POST', '/time-entries', { service_date: '2026-04-10', duration_hours: 20, phase_id: cd })).status).toBe(200);
+    await startTimer('2026-04-10T03:30:00Z');
+
+    const asked = await f.call('P04', 'POST', '/timers/stop');
+    expect(asked.status).toBe(409);
+    expect(asked.body.error).toMatchObject({ code: 'TIMER_NEEDS_HOURS', service_date: '2026-04-10', room_hours: '4.00' });
+    expect(await running()).toBe(1);
+
+    expect((await f.call('P04', 'POST', '/timers/stop', { duration_hours: 0 })).status).toBe(400);
+    const over = await f.call('P04', 'POST', '/timers/stop', { duration_hours: 6 });
+    expect(over.status).toBe(422);
+    expect(over.body.error.details[0].code).toBe('over_24h');
+    expect(await running()).toBe(1);
+
+    const kept = await f.call('P04', 'POST', '/timers/stop', { duration_hours: 3.5 });
+    expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+    expect(kept.body.duration_hours).toBe('3.50');
+    expect(await running()).toBe(0);
+
+    await startTimer('2026-04-11T03:30:00Z');
+    const gone = await f.call('P04', 'POST', '/timers/stop', { discard: true });
+    expect(gone.status).toBe(200);
+    expect(gone.body).toMatchObject({ time_entry_id: null, discarded: true });
+    expect(await running()).toBe(0);
+    expect((await f.owner.query(`select count(*)::int n from time_entry where person_id = $1 and service_date = '2026-04-11'`, [f.id('P04')])).rows[0].n).toBe(0);
+  });
+
+  it('hours asked for cannot exceed the time the timer ran', async () => {
+    await create('FT-72', { members: [{ person_id: f.id('P04') }] });
+    const cd = await phaseOf('FT-72', 'CD');
+    const pid = (await f.owner.query(`select id from project where code = 'FT-72'`)).rows[0].id;
+    await f.owner.query(
+      `insert into timer (firm_id, person_id, project_id, phase_id, started_at, created_by) values ($1,$2,$3,$4,now() - interval '1 hour',$2)`, [f.firmId, f.id('P04'), pid, cd],
+    );
+    expect((await f.call('P04', 'POST', '/timers/stop', { duration_hours: 3 })).status).toBe(400);
+    const ok = await f.call('P04', 'POST', '/timers/stop');
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(Number(ok.body.duration_hours)).toBeCloseTo(1, 1);
   });
 
   it('the default timesheet period is the firm-local week at 05:00 IST on a Monday', async () => {

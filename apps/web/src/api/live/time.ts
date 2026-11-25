@@ -90,7 +90,9 @@ export const correctEntry = (id: string, body: { duration_hours: number; reason:
 export const logEntry = (body: { service_date: string; duration_hours: number; note?: string; phase_id?: string; internal_category_id?: string }) =>
   apiFetch<{ id: string }>('/time-entries', { method: 'POST', body });
 export const startTimer = (cls: { phase_id?: string; internal_category_id?: string }) => apiFetch<{ id: string }>('/timers/start', { method: 'POST', body: cls });
-export const stopTimer = () => apiFetch<{ time_entry_id: string }>('/timers/stop', { method: 'POST', body: {} });
+/** POST /timers/stop. With no options the elapsed time is logged; a long or over-full timer comes back 409 TIMER_NEEDS_HOURS. */
+export const stopTimer = (opts: { duration_hours?: number; discard?: boolean } = {}) =>
+  apiFetch<{ time_entry_id: string | null; duration_hours: string; discarded?: boolean }>('/timers/stop', { method: 'POST', body: opts });
 
 /** ISO date of grid column `c` in the period starting `period`. */
 export const cellDate = (period: string, c: number) => iso(new Date(parse(period).getTime() + c * 86400000));

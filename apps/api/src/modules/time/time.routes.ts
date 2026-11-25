@@ -335,15 +335,51 @@ export function timeRoutes({ get, post, put, del }: Api) {
     )).rows[0];
     return { id: t.id, started_at: t.started_at, phase_id: c.phase_id, task_id: c.task_id };
   });
-  post('/timers/stop', async ({ tx, actor, firmId }) => {
-    const t = (await tx.query(`select * from timer where person_id = $1 and ended_at is null`, [actor.id])).rows[0];
+  /**
+   * Stops the running timer. Body (all optional): `discard: true` ends it with no entry; `duration_hours` logs that many
+   * hours instead of the elapsed time (never more than elapsed). A timer left running past a working day, or one whose
+   * day has no room left, is not logged on a guess: 409 TIMER_NEEDS_HOURS, the timer keeps running, and the person says
+   * how many hours to keep (or discards it).
+   */
+  post('/timers/stop', async ({ tx, actor, firmId, body }) => {
+    const t = (await tx.query(
+      `select *, extract(epoch from (now() - started_at)) / 3600 as elapsed_h from timer where person_id = $1 and ended_at is null`, [actor.id],
+    )).rows[0];
     if (!t) throw conflict('NO_TIMER', 'No timer is running.');
-    const h = (await tx.query(`update timer set ended_at = now() where id = $1 returning extract(epoch from (ended_at - started_at)) / 3600 as h`, [t.id])).rows[0].h;
-    const duration = Math.min(24, Math.max(0.01, Number(Number(h).toFixed(2))));
+    const end = () => tx.query('update timer set ended_at = now() where id = $1', [t.id]);
+    if (body?.discard === true) {
+      await end();
+      return { time_entry_id: null, duration_hours: hours(0), task_id: null, discarded: true };
+    }
+    const elapsed = Math.max(0.01, Number(Number(t.elapsed_h).toFixed(2)));
     // The day the work started, in the firm's timezone (a timer started at 05:00 IST is that day's work, not the previous UTC day's).
+    const date = await firmToday(tx, new Date(t.started_at));
+    let duration: number;
+    if (body?.duration_hours != null) {
+      duration = Number(body.duration_hours);
+      if (!(duration > 0) || duration > Math.min(24, elapsed + 0.01)) {
+        throw new ApiError(400, 'VALIDATION', `Hours must be above zero and no more than the ${Math.min(24, elapsed).toFixed(2)} h the timer ran.`, [{ field: 'duration_hours', code: 'range' }]);
+      }
+      duration = Number(duration.toFixed(2));
+    } else {
+      const logged = Number((await tx.query(
+        `select coalesce(sum(duration_hours),0) v from time_entry where person_id = $1 and service_date = $2 and approval_state <> 'Amended'`, [actor.id, date],
+      )).rows[0].v);
+      const room = Math.max(0, Number((24 - logged).toFixed(2)));
+      if (elapsed > OVER_DAY_HOURS || elapsed > room) {
+        throw conflict(
+          'TIMER_NEEDS_HOURS',
+          elapsed > OVER_DAY_HOURS
+            ? `This timer has run for ${elapsed.toFixed(2)} h since ${date}. Say how many hours you worked, or discard it.`
+            : `${date} has only ${room.toFixed(2)} h left. Say how many hours to keep, or discard the timer.`,
+          { started_at: t.started_at, service_date: date, elapsed_hours: hours(elapsed), room_hours: hours(room) },
+        );
+      }
+      duration = elapsed;
+    }
+    await end();
     // The timer's task, if it still fits its phase (a task that moved meanwhile is dropped rather than losing the time).
-    const entry = await insertEntry(tx, actor, firmId, { service_date: await firmToday(tx, new Date(t.started_at)), duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id, task_id: t.task_id }, true);
-
+    const entry = await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id, task_id: t.task_id }, true);
     return { time_entry_id: entry.id, duration_hours: hours(duration), task_id: entry.task_id ?? null };
   });
 

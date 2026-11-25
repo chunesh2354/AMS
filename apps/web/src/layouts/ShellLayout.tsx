@@ -20,6 +20,7 @@ import { apiFetch, failureMessage, isLive, signOut, type ListResponse } from '..
 import { pendingApprovalCount } from '../api/live/approvals';
 import { approvalsBadge } from '../api/live/shell';
 import { stopTimer } from '../api/live/time';
+import { StopTimerSheet, timerNeedsHours, type TimerNeedsHours } from '../screens/shared/stop-timer-sheet';
 import { getLiveProjects } from '../api/live/projects';
 import { getDirectory } from '../api/live/people';
 import { FIRM_NAME } from '../mock/studio-meridian';
@@ -66,6 +67,14 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
   const toast = useToast();
   const timer = useTimer();
   const { openLogTime, openLeave } = useOverlays();
+  // A timer that cannot be logged on its elapsed time (ran past a day, or its day is full) asks for the hours instead.
+  const [stopAsk, setStopAsk] = useState<TimerNeedsHours | null>(null);
+  const stopLive = () => {
+    stopTimer().then(timer.stop, (e: unknown) => {
+      const ask = timerNeedsHours(e);
+      if (ask) setStopAsk(ask); else toast({ variant: 'danger', message: failureMessage(e) });
+    });
+  };
 
   const narrow = useMediaQuery('(max-width: 1279px)');
   const phone = useMediaQuery('(max-width: 767px)');
@@ -189,7 +198,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
                 elapsedSeconds={timer.elapsed}
                 context={timer.context}
                 onStart={isLive ? () => openLogTime() : () => timer.start()}
-                onStop={isLive ? () => { stopTimer().then(timer.stop, (e: unknown) => toast({ variant: 'danger', message: failureMessage(e) })); } : timer.stop}
+                onStop={isLive ? stopLive : timer.stop}
               />
             }
           />
@@ -198,6 +207,13 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
         bottomBar={<BottomTabBar label={showFirmNav ? 'Firm' : 'Team'} items={tabs} />}
       >
         <Outlet />
+        {stopAsk && (
+          <StopTimerSheet
+            ask={stopAsk}
+            onClose={() => setStopAsk(null)}
+            onStopped={(message) => { setStopAsk(null); timer.stop(); toast({ variant: 'success', message }); }}
+          />
+        )}
       </AppShell>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} actions={actions} loading={isLive && recordsLoading} />
     </>

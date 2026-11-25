@@ -18,3 +18,7 @@ it('offers start when idle', () => {
   render(<TimerPill state="idle" />);
   expect(screen.getByRole('button', { name: 'Start timer' })).toBeInTheDocument();
 });
+it('a timer left running past a day reads in days and hours, not 358:00', () => {
+  render(<TimerPill state="running" elapsedSeconds={358 * 3600} context="AP-01" />);
+  expect(screen.getByRole('button', { name: /Stop timer.*14 d 22 h/ })).toHaveClass('timer--warn');
+});
