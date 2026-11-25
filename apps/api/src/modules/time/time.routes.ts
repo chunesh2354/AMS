@@ -70,35 +70,62 @@ async function assertDayRoom(tx: Tx, personId: string, date: string, adding: num
   if (t + adding > 24) throw ruleError('F10', `A day cannot hold more than 24 h. ${date} would have ${(t + adding).toFixed(2)} h.`, [{ field: 'duration_hours', code: 'over_24h' }]);
 }
 
-async function classify(tx: Tx, body: any, actor: Actor) {
+/**
+ * The task of a line (migration 012): optional, and in the same project and phase as the time. With a task and no
+ * phase, the task's phase is used. `lenient` (stopping a timer) drops a task that no longer fits instead of refusing.
+ */
+async function taskFor(tx: Tx, body: any, lenient = false): Promise<{ task_id: string | null; phase_id: string | null }> {
+  const phase = (body.phase_id ?? null) as string | null;
+  if (body.task_id == null || body.task_id === '') return { task_id: null, phase_id: phase };
+  if (body.internal_category_id) throw ruleError('R2', 'Internal work has no task. A task belongs to a project phase.', [{ field: 'task_id', code: 'internal' }]);
+  const t = isUuid(body.task_id) ? (await tx.query('select id, project_id, phase_id, title from task where id = $1', [body.task_id])).rows[0] : null;
+  if (!t) {
+    if (lenient) return { task_id: null, phase_id: phase };
+    throw notFound('Task');
+  }
+  if (!t.phase_id) {
+    if (lenient) return { task_id: null, phase_id: phase };
+    throw ruleError('F10', 'This task has no phase yet. Ask the project manager to give it one before logging time on it.', [{ field: 'task_id', code: 'no_phase' }]);
+  }
+  if (phase && phase !== t.phase_id) {
+    if (lenient) return { task_id: null, phase_id: phase };
+    throw ruleError('F10', 'This task belongs to another phase. Log the time on the phase of the task.', [{ field: 'task_id', code: 'not_on_phase' }]);
+  }
+  return { task_id: t.id, phase_id: t.phase_id };
+}
+
+async function classify(tx: Tx, body: any, actor: Actor, lenient = false) {
   if (body.phase_id && body.internal_category_id) throw ruleError('R2', 'A line is either project work or internal work, never both.');
-  if (!body.phase_id) return { project_id: null, phase_id: null, fee_component_id: null };
+  const task = await taskFor(tx, body, lenient);
+  body = { ...body, phase_id: task.phase_id };
+  if (!body.phase_id) return { project_id: null, phase_id: null, fee_component_id: null, task_id: null };
   const ph = (await tx.query('select ph.id, ph.project_id, pr.pm_id, pr.principal_id from phase ph join project pr on pr.id = ph.project_id where ph.id = $1', [body.phase_id])).rows[0];
   if (!ph) throw notFound('Phase');
   // Only the project's team (and its PM and principal) can record time on it, even with a known phase id.
   if (!actor.memberProjects.includes(ph.project_id) && ph.pm_id !== actor.id && ph.principal_id !== actor.id) {
     throw new ApiError(403, 'NOT_PROJECT_MEMBER', "You are not on this project's team. Ask the project manager to add you.");
   }
-  return { project_id: ph.project_id, phase_id: ph.id, fee_component_id: await resolveFeeComponent(tx, ph.id, body.fee_component_id) };
+  return { project_id: ph.project_id, phase_id: ph.id, fee_component_id: await resolveFeeComponent(tx, ph.id, body.fee_component_id), task_id: task.task_id };
 }
 
-async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any) {
+async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any, lenient = false) {
   const date = isoDate(body.service_date, 'service_date');
   const duration = Number(body.duration_hours);
   if (!(duration > 0)) throw new ApiError(400, 'VALIDATION', 'Duration must be above zero.', [{ field: 'duration_hours', code: 'range' }]);
   await assertDayRoom(tx, actor.id, date, duration);
-  const c = await classify(tx, body, actor);
+  const c = await classify(tx, body, actor, lenient);
   const ts = await ensureTimesheet(tx, firmId, actor.id, date);
   // R11: no budget, cap or NTE check happens here, by design. Actual work can always be recorded.
   return (await tx.query(
-    `insert into time_entry (firm_id, person_id, service_date, project_id, phase_id, internal_category_id, fee_component_id, duration_hours, note, timesheet_id, billing_state, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$2) returning id`,
-    [firmId, actor.id, date, c.project_id, c.phase_id, body.internal_category_id ?? null, c.fee_component_id, duration, body.note ?? null, ts.id, body.internal_category_id ? 'Non-billable' : 'Unbilled'],
+    `insert into time_entry (firm_id, person_id, service_date, project_id, phase_id, internal_category_id, fee_component_id, duration_hours, note, timesheet_id, billing_state, created_by, task_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$2,$12) returning id, task_id`,
+    [firmId, actor.id, date, c.project_id, c.phase_id, body.internal_category_id ?? null, c.fee_component_id, duration, body.note ?? null, ts.id, body.internal_category_id ? 'Non-billable' : 'Unbilled', c.task_id],
   )).rows[0];
 }
 
-const ENTRY_SELECT = `select te.*, ph.name as phase_name, pr.code as project_code, pr.name as project_name, ic.name as category_name
-  from time_entry te left join phase ph on ph.id = te.phase_id left join project pr on pr.id = te.project_id left join internal_work_category ic on ic.id = te.internal_category_id`;
+const ENTRY_SELECT = `select te.*, ph.name as phase_name, pr.code as project_code, pr.name as project_name, ic.name as category_name, tk.title as task_title
+  from time_entry te left join phase ph on ph.id = te.phase_id left join project pr on pr.id = te.project_id left join internal_work_category ic on ic.id = te.internal_category_id
+  left join task tk on tk.id = te.task_id`;
 
 export function timeRoutes({ get, post, put, del }: Api) {
   get('/me/time', async ({ tx, actor, query }) => {
@@ -109,9 +136,11 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const lines = new Map<string, any>();
     for (const e of entries) {
       if (e.approval_state === 'Amended') continue;
-      const key = e.phase_id ?? e.internal_category_id ?? `unclassified-${e.id}`;
+      // A line is one phase (and task, when the time is on a task), one internal category, or one unclassified entry.
+      const key = e.phase_id ? (e.task_id ? `${e.phase_id}:${e.task_id}` : e.phase_id) : e.internal_category_id ?? `unclassified-${e.id}`;
       const line = lines.get(key) ?? {
         key, phase_id: e.phase_id, internal_category_id: e.internal_category_id,
+        task_id: e.task_id ?? null, task: e.task_id ? { id: e.task_id, title: e.task_title } : null,
         title: e.phase_name ?? e.category_name ?? 'Unclassified',
         subtitle: e.project_code ? `${e.project_code} ${e.project_name}` : e.internal_category_id ? 'Internal' : 'Needs a project and phase',
         hours: Array(7).fill(0), entries: [], states: new Set<string>(), reason: null,
@@ -138,18 +167,27 @@ export function timeRoutes({ get, post, put, del }: Api) {
   post('/time-entries', async ({ tx, actor, firmId, body }) => {
     required(body, ['service_date', 'duration_hours']);
     const row = await insertEntry(tx, actor, firmId, body);
-    return { id: row.id, approval_state: 'Draft' };
+    return { id: row.id, approval_state: 'Draft', task_id: row.task_id ?? null };
   });
 
-  /** Sets the hours for one grid cell: one line on one day. Zero clears it. Locked hours cannot be changed. */
-  put('/me/time/cell', async ({ tx, actor, firmId, body }) => {
+  /**
+   * Sets the hours for one grid cell: one line on one day. Zero clears it. Locked hours cannot be changed.
+   * A project line is (phase_id, task_id): a phase line without task_id holds only the time that is not on a task.
+   */
+  put('/me/time/cell', async ({ tx, actor, firmId, body: raw }) => {
+    let body = raw;
     const date = isoDate(body.service_date, 'service_date');
     const value = Number(body.duration_hours);
     if (!(value >= 0)) throw new ApiError(400, 'VALIDATION', 'Hours must be zero or more.', [{ field: 'duration_hours', code: 'range' }]);
-    const where = body.phase_id ? 'phase_id = $3' : body.internal_category_id ? 'internal_category_id = $3' : 'id = $3';
+    if (body.task_id != null && body.task_id !== '') body = { ...body, phase_id: (await taskFor(tx, body)).phase_id };
+    const taskId = body.phase_id && body.task_id ? (body.task_id as string) : null;
+    const where = body.phase_id ? 'phase_id = $3 and task_id is not distinct from $4::uuid' : body.internal_category_id ? 'internal_category_id = $3' : 'id = $3';
     const ref = body.phase_id ?? body.internal_category_id ?? body.entry_id;
     if (!ref) throw new ApiError(400, 'VALIDATION', 'Say which line this cell belongs to.', [{ field: 'phase_id', code: 'required' }]);
-    const existing = (await tx.query(`select id, approval_state, timesheet_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`, [actor.id, date, ref])).rows;
+    const existing = (await tx.query(
+      `select id, approval_state, timesheet_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`,
+      body.phase_id ? [actor.id, date, ref, taskId] : [actor.id, date, ref],
+    )).rows;
     if (existing.some((e) => !['Draft', 'Returned'].includes(e.approval_state))) throw conflict('LOCKED', 'Submitted or approved hours cannot be edited. Request a correction instead.');
     await assertDayRoom(tx, actor.id, date, value, existing.map((e) => e.id));
     if (existing.length && value > 0) {
@@ -158,7 +196,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     } else if (existing.length) {
       for (const e of existing) await tx.query('delete from time_entry where id = $1', [e.id]);
     } else if (value > 0) {
-      await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: value, phase_id: body.phase_id, internal_category_id: body.internal_category_id });
+      await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: value, phase_id: body.phase_id, internal_category_id: body.internal_category_id, task_id: taskId });
     }
     return { ok: true };
   });
@@ -168,12 +206,24 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const e = (await tx.query('select * from time_entry where id = $1', [id])).rows[0];
     if (!e || e.person_id !== actor.id) throw notFound('Time entry');
     if (!['Draft', 'Returned'].includes(e.approval_state)) throw conflict('LOCKED', 'Submitted or approved hours cannot be edited. Request a correction instead.');
-    const c = 'phase_id' in body || 'internal_category_id' in body ? await classify(tx, body, actor) : e;
+    // A task follows its phase: a new phase without a task_id drops the old task (it belonged to the old phase).
+    // On the same phase the entry keeps its fee component (R10) unless the body names another.
+    const reclass = 'phase_id' in body || 'internal_category_id' in body || 'task_id' in body;
+    const samePhase = !('internal_category_id' in body && body.internal_category_id) && (!('phase_id' in body) || body.phase_id === e.phase_id);
+    const c = reclass
+      ? await classify(tx, {
+        ...body,
+        fee_component_id: body.fee_component_id ?? (samePhase && e.fee_component_id ? e.fee_component_id : undefined),
+        phase_id: 'phase_id' in body ? body.phase_id : 'internal_category_id' in body ? null : e.phase_id,
+        internal_category_id: 'internal_category_id' in body ? body.internal_category_id : 'phase_id' in body || 'task_id' in body ? null : e.internal_category_id,
+        task_id: 'task_id' in body ? body.task_id : ('phase_id' in body && body.phase_id !== e.phase_id) || body.internal_category_id ? null : e.task_id,
+      }, actor)
+      : e;
     const duration = body.duration_hours ?? e.duration_hours;
     await assertDayRoom(tx, actor.id, e.service_date, Number(duration), [id]);
     await tx.query(
-      `update time_entry set project_id = $2, phase_id = $3, internal_category_id = $4, fee_component_id = $5, duration_hours = $6, note = $7, billing_state = $8, updated_by = $9, updated_at = now() where id = $1`,
-      [id, c.project_id, c.phase_id, body.internal_category_id ?? ('internal_category_id' in body ? null : e.internal_category_id), c.fee_component_id, duration, body.note ?? e.note, (body.internal_category_id ?? (c.phase_id ? null : e.internal_category_id)) ? 'Non-billable' : 'Unbilled', actor.id],
+      `update time_entry set project_id = $2, phase_id = $3, internal_category_id = $4, fee_component_id = $5, duration_hours = $6, note = $7, billing_state = $8, updated_by = $9, updated_at = now(), task_id = $10 where id = $1`,
+      [id, c.project_id, c.phase_id, body.internal_category_id ?? ('internal_category_id' in body ? null : e.internal_category_id), c.fee_component_id, duration, body.note ?? e.note, (body.internal_category_id ?? (c.phase_id ? null : e.internal_category_id)) ? 'Non-billable' : 'Unbilled', actor.id, c.task_id ?? null],
     );
     return { ok: true };
   });
@@ -250,9 +300,9 @@ export function timeRoutes({ get, post, put, del }: Api) {
     if (!billed && !(next > 0)) throw ruleError('F10', 'Corrected hours must be above zero.');
     await tx.query(`update time_entry set approval_state = 'Amended', updated_by = $2, updated_at = now() where id = $1`, [id, actor.id]);
     const row = (await tx.query(
-      `insert into time_entry (firm_id, person_id, service_date, project_id, phase_id, internal_category_id, fee_component_id, duration_hours, note, timesheet_id, approval_state, billing_state, corrected_from_id, correction_reason, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Submitted',$11,$12,$13,$2) returning id`,
-      [firmId, actor.id, e.service_date, e.project_id, e.phase_id, e.internal_category_id, e.fee_component_id, newDuration, body.note ?? e.note, e.timesheet_id, e.internal_category_id ? 'Non-billable' : 'Unbilled', id, body.reason],
+      `insert into time_entry (firm_id, person_id, service_date, project_id, phase_id, internal_category_id, fee_component_id, duration_hours, note, timesheet_id, approval_state, billing_state, corrected_from_id, correction_reason, created_by, task_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Submitted',$11,$12,$13,$2,$14) returning id`,
+      [firmId, actor.id, e.service_date, e.project_id, e.phase_id, e.internal_category_id, e.fee_component_id, newDuration, body.note ?? e.note, e.timesheet_id, e.internal_category_id ? 'Non-billable' : 'Unbilled', id, body.reason, e.task_id],
     )).rows[0];
     const approver = e.project_id ? await projectTimeApprover(tx, e, actor.id) : await routeApprover(tx, await resolvePersonApprover(tx, actor.id), actor.id);
     const ar = (await tx.query(
@@ -269,21 +319,21 @@ export function timeRoutes({ get, post, put, del }: Api) {
   // ----- Timers (F10): one active per person; stopping makes a draft entry with the exact duration. -----
   get('/timers/active', async ({ tx, actor }) => {
     const t = (await tx.query(
-      `select t.id, t.started_at, t.project_id, t.phase_id, t.internal_category_id, ph.name as phase_name, pr.code as project_code from timer t
-       left join phase ph on ph.id = t.phase_id left join project pr on pr.id = t.project_id where t.person_id = $1 and t.ended_at is null`, [actor.id],
+      `select t.id, t.started_at, t.project_id, t.phase_id, t.internal_category_id, t.task_id, tk.title as task_title, ph.name as phase_name, pr.code as project_code from timer t
+       left join phase ph on ph.id = t.phase_id left join project pr on pr.id = t.project_id left join task tk on tk.id = t.task_id where t.person_id = $1 and t.ended_at is null`, [actor.id],
     )).rows[0];
     return { active: t ?? null };
   });
   post('/timers/start', async ({ tx, actor, firmId, body }) => {
-    if (!body.phase_id && !body.internal_category_id) throw ruleError('F10', 'A timer needs a project phase or an internal category.');
+    if (!body.phase_id && !body.internal_category_id && !body.task_id) throw ruleError('F10', 'A timer needs a project phase (or a task) or an internal category.');
     const running = await tx.query('select id from timer where person_id = $1 and ended_at is null', [actor.id]);
     if (running.rowCount) throw conflict('TIMER_RUNNING', 'A timer is already running.', { conflicting_id: running.rows[0].id });
     const c = await classify(tx, body, actor);
     const t = (await tx.query(
-      `insert into timer (firm_id, person_id, project_id, phase_id, internal_category_id, created_by) values ($1,$2,$3,$4,$5,$2) returning id, started_at`,
-      [firmId, actor.id, c.project_id, c.phase_id, body.internal_category_id ?? null],
+      `insert into timer (firm_id, person_id, project_id, phase_id, internal_category_id, created_by, task_id) values ($1,$2,$3,$4,$5,$2,$6) returning id, started_at`,
+      [firmId, actor.id, c.project_id, c.phase_id, body.internal_category_id ?? null, c.task_id],
     )).rows[0];
-    return { id: t.id, started_at: t.started_at };
+    return { id: t.id, started_at: t.started_at, phase_id: c.phase_id, task_id: c.task_id };
   });
   post('/timers/stop', async ({ tx, actor, firmId }) => {
     const t = (await tx.query(`select * from timer where person_id = $1 and ended_at is null`, [actor.id])).rows[0];
@@ -291,9 +341,10 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const h = (await tx.query(`update timer set ended_at = now() where id = $1 returning extract(epoch from (ended_at - started_at)) / 3600 as h`, [t.id])).rows[0].h;
     const duration = Math.min(24, Math.max(0.01, Number(Number(h).toFixed(2))));
     // The day the work started, in the firm's timezone (a timer started at 05:00 IST is that day's work, not the previous UTC day's).
-    const entry = await insertEntry(tx, actor, firmId, { service_date: await firmToday(tx, new Date(t.started_at)), duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id });
+    // The timer's task, if it still fits its phase (a task that moved meanwhile is dropped rather than losing the time).
+    const entry = await insertEntry(tx, actor, firmId, { service_date: await firmToday(tx, new Date(t.started_at)), duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id, task_id: t.task_id }, true);
 
-    return { time_entry_id: entry.id, duration_hours: hours(duration) };
+    return { time_entry_id: entry.id, duration_hours: hours(duration), task_id: entry.task_id ?? null };
   });
 
   get('/internal-categories', async ({ tx, req }) => list(req, (await tx.query('select id, key, name from internal_work_category order by name')).rows));

@@ -1,10 +1,11 @@
 import { addDays } from '@ams/domain';
+import { ACTUAL_SQL } from '../projects/projects.routes';
 import { ApiError, notFound, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { notify } from '../../audit/notify';
 import { assertProjectVisible, authorize, can } from '../../auth/authorize';
 import type { Actor } from '../../auth/actor';
-import { list } from '../../http/responses';
+import { hours, list } from '../../http/responses';
 import { isoDate, isUuid, required, uuidParam } from '../../http/validation';
 import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
@@ -24,19 +25,30 @@ const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 4000;
 const NOTE_MAX = 2000;
 /** Fields only a planner may change. The assignee may send status and note. */
-const PLANNER_FIELDS = ['title', 'description', 'phase_id', 'assignee_id', 'due_date', 'priority', 'sort_order', 'add_to_team'] as const;
+const PLANNER_FIELDS = ['title', 'description', 'phase_id', 'assignee_id', 'due_date', 'start_date', 'estimate_hours', 'priority', 'sort_order', 'add_to_team'] as const;
+const ESTIMATE_MAX = 99_999.99;
 
-const bad = (field: string, message: string, code = 'invalid') => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
+export const bad = (field: string, message: string, code = 'invalid') => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
 
-const TASK_SQL = `
+/** Hours recorded on a task: every entry that is not superseded by a correction (Draft, Submitted, Returned, Approved). */
+export const LOGGED_SQL = `approval_state <> 'Amended'`;
+
+export const TASK_SQL = `
   select t.*, p.code as project_code, p.name as project_name, p.pm_id, p.principal_id,
     ph.code as phase_code, ph.name as phase_name, a.ref_code as assignee_ref, a.name as assignee_name, a.job_title as assignee_title,
-    (select count(*) from task_note n where n.task_id = t.id)::int as note_count
+    (select count(*) from task_note n where n.task_id = t.id)::int as note_count,
+    (select count(*) from task s where s.parent_task_id = t.id)::int as subtask_count,
+    coalesce((select sum(te.duration_hours) from time_entry te where te.task_id = t.id and te.${LOGGED_SQL}), 0) as logged_hours,
+    coalesce((select sum(te.duration_hours) from time_entry te where te.task_id = t.id and ${ACTUAL_SQL.replace(/(approval_state|billing_state)/g, 'te.$1')}), 0) as approved_hours
   from task t join project p on p.id = t.project_id left join phase ph on ph.id = t.phase_id left join person a on a.id = t.assignee_id`;
 
-const mayPlan = (actor: Actor, projectId: string) => can(actor, 'projects.plan', { projectId });
+export const mayPlan = (actor: Actor, projectId: string) => can(actor, 'projects.plan', { projectId });
+/** Who may see a task: its assignee, and anyone who can see its project. */
+export function assertTaskVisible(actor: Actor, t: { assignee_id: string | null; project_id: string }) {
+  if (t.assignee_id !== actor.id) assertProjectVisible(actor, t.project_id);
+}
 
-function taskView(actor: Actor, r: any) {
+export function taskView(actor: Actor, r: any) {
   const planner = mayPlan(actor, r.project_id);
   return {
     id: r.id,
@@ -45,7 +57,12 @@ function taskView(actor: Actor, r: any) {
     title: r.title,
     description: r.description,
     assignee: r.assignee_id ? { id: r.assignee_id, ref_code: r.assignee_ref, name: r.assignee_name, job_title: r.assignee_title } : null,
+    parent_task_id: r.parent_task_id,
+    start_date: r.start_date,
     due_date: r.due_date,
+    estimate_hours: hours(r.estimate_hours),
+    logged_hours: hours(r.logged_hours),
+    subtask_count: r.subtask_count,
     status: r.status,
     priority: r.priority,
     sort_order: r.sort_order,
@@ -58,7 +75,7 @@ function taskView(actor: Actor, r: any) {
   };
 }
 
-async function loadTask(tx: Tx, id: string) {
+export async function loadTask(tx: Tx, id: string) {
   const r = (await tx.query(`${TASK_SQL} where t.id = $1`, [id])).rows[0];
   if (!r) throw notFound('Task');
   return r;
@@ -84,6 +101,18 @@ const oneOf = <T extends string>(v: unknown, values: readonly T[], field: string
   return v as T;
 };
 const dueOf = (v: unknown) => (v == null || v === '' ? null : isoDate(v, 'due_date'));
+const startOf = (v: unknown) => (v == null || v === '' ? null : isoDate(v, 'start_date'));
+const estimateOf = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < 0 || n > ESTIMATE_MAX) throw bad('estimate_hours', 'The estimate is a number of hours from 0.', 'range');
+  if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) throw bad('estimate_hours', 'The estimate can have at most two decimals.', 'precision');
+  return n;
+};
+/** A start after the due date is refused (400), as on PUT /tasks/:id/dates. */
+export function assertDateOrder(start: string | null, end: string | null, field = 'start_date') {
+  if (start && end && start > end) throw bad(field, 'The start date must be on or before the end date.', 'order');
+}
 const sortOf = (v: unknown) => {
   if (v == null) return null;
   if (!Number.isInteger(v) || (v as number) < 0 || (v as number) > 1_000_000) throw bad('sort_order', 'Sort order is a whole number from 0.');
@@ -133,6 +162,97 @@ async function tellAssignee(tx: Tx, actor: Actor, firmId: string, assigneeId: st
   await notify(tx, firmId, assigneeId, 'task_assigned', `${actor.name} assigned you "${title}" on ${projectCode}.`, { type: 'task', id: taskId });
 }
 
+/**
+ * Creates a task, or a sub-task of `parent` (one level: a sub-task cannot have its own). The caller has checked
+ * projects.plan. A sub-task takes its parent's phase unless it names one.
+ */
+export async function createTask(tx: Tx, actor: Actor, firmId: string, p: any, body: any, parent: any | null) {
+  required(body, ['title']);
+  const title = text(body.title, 'title', 'Title', TITLE_MAX, { required: true })!;
+  const description = text(body.description, 'description', 'Description', DESCRIPTION_MAX);
+  const status = body.status == null ? 'To do' : oneOf(body.status, TASK_STATUSES, 'status', 'Status');
+  const priority = body.priority == null ? 'Normal' : oneOf(body.priority, TASK_PRIORITIES, 'priority', 'Priority');
+  const due = dueOf(body.due_date);
+  const start = startOf(body.start_date);
+  assertDateOrder(start, due);
+  const estimate = estimateOf(body.estimate_hours);
+  const phaseId = body.phase_id === undefined && parent ? (parent.phase_id as string | null) : await phaseOf(tx, p.id, body.phase_id);
+  const sort = sortOf(body.sort_order)
+    ?? Number((await tx.query(
+      parent ? 'select coalesce(max(sort_order) + 1, 0) n from task where parent_task_id = $1' : 'select coalesce(max(sort_order) + 1, 0) n from task where project_id = $1',
+      [parent ? parent.id : p.id],
+    )).rows[0].n);
+  const assignee = await checkAssignee(tx, actor, firmId, p, body.assignee_id, body.add_to_team === true);
+
+  const id = (await tx.query(
+    `insert into task (firm_id, project_id, phase_id, title, description, assignee_id, due_date, status, priority, sort_order, completed_at,
+       start_date, estimate_hours, parent_task_id, created_by, updated_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, case when $8 = 'Done' then now() end, $11, $12, $13, $14, $14) returning id`,
+    [firmId, p.id, phaseId, title, description, assignee.id, due, status, priority, sort, start, estimate, parent?.id ?? null, actor.id],
+  )).rows[0].id as string;
+  const audit_event_id = await audit(tx, actor, firmId, {
+    recordType: 'task', recordId: id, action: 'create',
+    next: { project: p.code, title, assignee_id: assignee.id, start_date: start, due_date: due, estimate_hours: estimate, status, priority, ...(parent ? { parent_task_id: parent.id } : {}) },
+  });
+  if (assignee.id) await audit(tx, actor, firmId, { recordType: 'task', recordId: id, action: 'assign', next: { assignee_id: assignee.id } });
+  await tellAssignee(tx, actor, firmId, assignee.id, title, p.code, id);
+  return { ...taskView(actor, await loadTask(tx, id)), notes: [], added_to_team: assignee.added, audit_event_id };
+}
+
+/** Followers of a task, by name. */
+export async function followersOf(tx: Tx, taskId: string) {
+  return (await tx.query(
+    `select p.id, p.ref_code, p.name, f.created_at from task_follower f join person p on p.id = f.person_id where f.task_id = $1 order by p.name`, [taskId],
+  )).rows.map((r) => ({ id: r.id as string, ref_code: r.ref_code as string, name: r.name as string, since: r.created_at }));
+}
+
+/** Tells the task's followers, except the actor and anyone in `skip` (already told about this change). */
+export async function tellFollowers(tx: Tx, actor: Actor, firmId: string, taskId: string, eventType: string, message: string, skip: Set<string> = new Set()) {
+  const ids = (await tx.query('select person_id from task_follower where task_id = $1', [taskId])).rows.map((r) => r.person_id as string);
+  for (const id of ids) {
+    if (id === actor.id || skip.has(id)) continue;
+    skip.add(id);
+    await notify(tx, firmId, id, eventType, message, { type: 'task', id: taskId });
+  }
+}
+
+const taskRef = (r: any) => ({ id: r.id, title: r.title, status: r.status, start_date: r.start_date, due_date: r.due_date, assignee_id: r.assignee_id, phase_id: r.phase_id });
+
+/** The task page: the task, its notes, sub-tasks, dependencies both ways, followers and hours against the estimate. */
+export async function taskDetail(tx: Tx, actor: Actor, t: any) {
+  const subtasks = (await tx.query(`${TASK_SQL} where t.parent_task_id = $1 order by t.sort_order, t.created_at`, [t.id])).rows.map((r) => taskView(actor, r));
+  const deps = (await tx.query(
+    `select d.id, d.type, d.lag_days, d.predecessor_id, d.successor_id, o.id as other_id, o.title, o.status, o.start_date, o.due_date, o.assignee_id, o.phase_id
+     from task_dependency d join task o on o.id = case when d.successor_id = $1 then d.predecessor_id else d.successor_id end
+     where d.successor_id = $1 or d.predecessor_id = $1 order by o.due_date nulls last, o.title`, [t.id],
+  )).rows;
+  const link = (d: any) => ({ dependency_id: d.id, type: d.type, lag_days: d.lag_days, task: taskRef({ ...d, id: d.other_id }) });
+  const followers = await followersOf(tx, t.id);
+  const subEstimate = subtasks.reduce((s, x) => s + Number(x.estimate_hours ?? 0), 0);
+  const subLogged = subtasks.reduce((s, x) => s + Number(x.logged_hours ?? 0), 0);
+  const est = t.estimate_hours == null ? null : Number(t.estimate_hours);
+  const logged = Number(t.logged_hours);
+  const anyEstimate = est != null || subtasks.some((x) => x.estimate_hours != null);
+  return {
+    ...taskView(actor, t),
+    notes: await notesOf(tx, t.id),
+    subtasks,
+    blocked_by: deps.filter((d) => d.successor_id === t.id).map(link),
+    blocks: deps.filter((d) => d.predecessor_id === t.id).map(link),
+    followers,
+    is_following: followers.some((x) => x.id === actor.id),
+    approved_hours: hours(t.approved_hours),
+    estimate: {
+      estimate_hours: hours(est),
+      logged_hours: hours(logged),
+      remaining_hours: est == null ? null : hours(Math.max(0, est - logged)),
+      over_estimate: est != null && logged > est,
+      subtasks: { estimate_hours: hours(subEstimate), logged_hours: hours(subLogged) },
+      total: { estimate_hours: anyEstimate ? hours((est ?? 0) + subEstimate) : null, logged_hours: hours(logged + subLogged) },
+    },
+  };
+}
+
 async function studioToday(tx: Tx) {
   const tz = ((await tx.query('select timezone from firm')).rows[0]?.timezone as string | undefined) || 'Asia/Kolkata';
   return localDate(tz);
@@ -152,34 +272,13 @@ export function taskRoutes({ get, post, put, del }: Api) {
   post('/projects/:code/tasks', async ({ tx, actor, firmId, params, body }) => {
     const p = await findProject(tx, params.code);
     authorize(actor, 'projects.plan', { projectId: p.id });
-    required(body, ['title']);
-    const title = text(body.title, 'title', 'Title', TITLE_MAX, { required: true })!;
-    const description = text(body.description, 'description', 'Description', DESCRIPTION_MAX);
-    const status = body.status == null ? 'To do' : oneOf(body.status, TASK_STATUSES, 'status', 'Status');
-    const priority = body.priority == null ? 'Normal' : oneOf(body.priority, TASK_PRIORITIES, 'priority', 'Priority');
-    const due = dueOf(body.due_date);
-    const phaseId = await phaseOf(tx, p.id, body.phase_id);
-    const sort = sortOf(body.sort_order)
-      ?? Number((await tx.query('select coalesce(max(sort_order) + 1, 0) n from task where project_id = $1', [p.id])).rows[0].n);
-    const assignee = await checkAssignee(tx, actor, firmId, p, body.assignee_id, body.add_to_team === true);
-
-    const id = (await tx.query(
-      `insert into task (firm_id, project_id, phase_id, title, description, assignee_id, due_date, status, priority, sort_order, completed_at, created_by, updated_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, case when $8 = 'Done' then now() end, $11, $11) returning id`,
-      [firmId, p.id, phaseId, title, description, assignee.id, due, status, priority, sort, actor.id],
-    )).rows[0].id as string;
-    const audit_event_id = await audit(tx, actor, firmId, {
-      recordType: 'task', recordId: id, action: 'create', next: { project: p.code, title, assignee_id: assignee.id, due_date: due, status, priority },
-    });
-    if (assignee.id) await audit(tx, actor, firmId, { recordType: 'task', recordId: id, action: 'assign', next: { assignee_id: assignee.id } });
-    await tellAssignee(tx, actor, firmId, assignee.id, title, p.code, id);
-    return { ...taskView(actor, await loadTask(tx, id)), notes: [], added_to_team: assignee.added, audit_event_id };
+    return createTask(tx, actor, firmId, p, body, null);
   });
 
   get('/tasks/:id', async ({ tx, actor, params }) => {
     const t = await loadTask(tx, uuidParam(params.id, 'Task'));
-    if (t.assignee_id !== actor.id) assertProjectVisible(actor, t.project_id);
-    return { ...taskView(actor, t), notes: await notesOf(tx, t.id) };
+    assertTaskVisible(actor, t);
+    return taskDetail(tx, actor, t);
   });
 
   put('/tasks/:id', async ({ tx, actor, firmId, params, body }) => {
@@ -202,7 +301,10 @@ export function taskRoutes({ get, post, put, del }: Api) {
       title: prev.title as string, description: prev.description as string | null, phase_id: prev.phase_id as string | null,
       assignee_id: prev.assignee_id as string | null, due_date: prev.due_date as string | null, status: prev.status as string,
       priority: prev.priority as string, sort_order: prev.sort_order as number,
+      start_date: prev.start_date as string | null, estimate_hours: (prev.estimate_hours == null ? null : Number(prev.estimate_hours)) as number | null,
     };
+    // prev with the estimate as a number, so an unchanged estimate is not reported as a change.
+    const before: Record<string, unknown> = { ...prev, estimate_hours: next.estimate_hours };
     if (body.status !== undefined) next.status = oneOf(body.status, TASK_STATUSES, 'status', 'Status');
     const note = text(body.note, 'note', 'Note', NOTE_MAX);
     let added = false;
@@ -211,8 +313,15 @@ export function taskRoutes({ get, post, put, del }: Api) {
       if (body.description !== undefined) next.description = text(body.description, 'description', 'Description', DESCRIPTION_MAX);
       if (body.phase_id !== undefined) next.phase_id = await phaseOf(tx, prev.project_id, body.phase_id);
       if (body.due_date !== undefined) next.due_date = dueOf(body.due_date);
+      if (body.start_date !== undefined) next.start_date = startOf(body.start_date);
+      if (body.estimate_hours !== undefined) next.estimate_hours = estimateOf(body.estimate_hours);
+      assertDateOrder(next.start_date, next.due_date);
       if (body.priority !== undefined) next.priority = oneOf(body.priority, TASK_PRIORITIES, 'priority', 'Priority');
       if (body.sort_order !== undefined) next.sort_order = sortOf(body.sort_order) ?? prev.sort_order;
+      // Time on a task stays in the task's phase (migration 012), so a task with hours keeps its phase.
+      if (next.phase_id !== prev.phase_id && (await tx.query('select 1 from time_entry where task_id = $1 limit 1', [prev.id])).rowCount) {
+        throw ruleError('F10', 'Time is logged on this task in its current phase, so its phase cannot change.', [{ field: 'phase_id', code: 'has_time' }]);
+      }
       if (body.assignee_id !== undefined && (body.assignee_id || null) !== prev.assignee_id) {
         const p = await findProject(tx, prev.project_id);
         const a = await checkAssignee(tx, actor, firmId, p, body.assignee_id, body.add_to_team === true);
@@ -223,17 +332,18 @@ export function taskRoutes({ get, post, put, del }: Api) {
 
     await tx.query(
       `update task set title = $2, description = $3, phase_id = $4, assignee_id = $5, due_date = $6, status = $7, priority = $8, sort_order = $9,
-         completed_at = case when $7 = 'Done' then coalesce(completed_at, now()) end, updated_by = $10, updated_at = now() where id = $1`,
-      [prev.id, next.title, next.description, next.phase_id, next.assignee_id, next.due_date, next.status, next.priority, next.sort_order, actor.id],
+         completed_at = case when $7 = 'Done' then coalesce(completed_at, now()) end, updated_by = $10, updated_at = now(),
+         start_date = $11, estimate_hours = $12 where id = $1`,
+      [prev.id, next.title, next.description, next.phase_id, next.assignee_id, next.due_date, next.status, next.priority, next.sort_order, actor.id, next.start_date, next.estimate_hours],
     );
     if (note) await tx.query('insert into task_note (firm_id, task_id, author_id, body, created_by) values ($1,$2,$3,$4,$3)', [firmId, prev.id, actor.id, note]);
 
-    const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== prev[k]);
+    const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== before[k]);
     let audit_event_id: string | null = null;
     const record = async (action: string, keys: string[], extra: Record<string, unknown> = {}) => {
       audit_event_id = await audit(tx, actor, firmId, {
         recordType: 'task', recordId: prev.id, action,
-        previous: Object.fromEntries(keys.map((k) => [k, prev[k]])), next: { ...Object.fromEntries(keys.map((k) => [k, (next as any)[k]])), ...extra },
+        previous: Object.fromEntries(keys.map((k) => [k, before[k]])), next: { ...Object.fromEntries(keys.map((k) => [k, (next as any)[k]])), ...extra },
       });
     };
     const other = changed.filter((k) => k !== 'assignee_id' && k !== 'status');
@@ -245,9 +355,17 @@ export function taskRoutes({ get, post, put, del }: Api) {
       await tellAssignee(tx, actor, firmId, next.assignee_id, next.title, prev.project_code, prev.id);
     }
     // The planner hears when the assignee finishes or blocks their task.
+    const told = new Set<string>();
     if (!planner && changed.includes('status') && (next.status === 'Done' || next.status === 'Blocked') && prev.created_by && prev.created_by !== actor.id) {
       await notify(tx, firmId, prev.created_by, `task_${next.status === 'Done' ? 'completed' : 'blocked'}`, `${actor.name} marked "${next.title}" ${next.status === 'Done' ? 'done' : 'blocked'} on ${prev.project_code}.`, { type: 'task', id: prev.id });
+      told.add(prev.created_by);
     }
+    // Followers hear about status changes and new notes: one notification per kind, never to the actor, and not a
+    // second status notice to a creator who was just told above.
+    if (changed.includes('status')) {
+      await tellFollowers(tx, actor, firmId, prev.id, 'task_status_changed', `${actor.name} moved "${next.title}" on ${prev.project_code} from ${prev.status} to ${next.status}.`, told);
+    }
+    if (note) await tellFollowers(tx, actor, firmId, prev.id, 'task_note_added', `${actor.name} added a note to "${next.title}" on ${prev.project_code}.`);
     return { ...taskView(actor, await loadTask(tx, prev.id)), notes: await notesOf(tx, prev.id), added_to_team: added, audit_event_id };
   });
 
@@ -255,9 +373,12 @@ export function taskRoutes({ get, post, put, del }: Api) {
     const prev = await loadTask(tx, uuidParam(params.id, 'Task'));
     assertProjectVisible(actor, prev.project_id);
     authorize(actor, 'projects.plan', { projectId: prev.project_id });
+    // Sub-tasks, dependencies, followers and notes go with the task. Logged time stays on its phase (task_id cleared).
+    const subtaskIds = (await tx.query('select id from task where parent_task_id = $1 order by sort_order', [prev.id])).rows.map((r) => r.id as string);
     await tx.query('delete from task where id = $1', [prev.id]);
     const audit_event_id = await audit(tx, actor, firmId, {
-      recordType: 'task', recordId: prev.id, action: 'delete', previous: { project: prev.project_code, title: prev.title, assignee_id: prev.assignee_id, status: prev.status },
+      recordType: 'task', recordId: prev.id, action: 'delete',
+      previous: { project: prev.project_code, title: prev.title, assignee_id: prev.assignee_id, status: prev.status, ...(subtaskIds.length ? { subtask_ids: subtaskIds } : {}) },
     });
     return { id: prev.id, deleted: true, audit_event_id };
   });
