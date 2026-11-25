@@ -9,6 +9,7 @@ import type { Api } from '../../http/api';
 import { readyFor } from '../billing/billing.routes';
 import { ACTUAL_SQL } from '../projects/projects.routes';
 import { localDate } from '../time/time.routes';
+import { availableHours, dailyAvailability, round2 } from '../planning/availability';
 
 /**
  * GET /overview: the studio home (/firm/overview) from real data. Key figures, the "Needs attention" list and a compact
@@ -20,9 +21,11 @@ import { localDate } from '../time/time.routes';
  */
 
 export const STALE_APPROVAL_DAYS = 3;
-/** No working schedules are stored yet, so available hours use a standard weekday, and the figure says so (R22). */
-export const STANDARD_DAY_HOURS = 8;
-export const SCHEDULES_MISSING = `Working schedules (a standard ${STANDARD_DAY_HOURS} h weekday is assumed)`;
+/**
+ * Available hours come from the planning capacity (weekly hours, studio holidays, approved leave). Working days are
+ * not stored yet: weekly hours are spread over Monday to Friday, and the figure says so (R22).
+ */
+export const SCHEDULES_MISSING = 'Working days (weekly hours are spread over Monday to Friday)';
 
 export type AttentionType = 'overdue_invoice' | 'nte_excess' | 'phase_overrun' | 'over_day_hours' | 'missing_cost_rate' | 'returned_lines' | 'stale_approval';
 type Severity = 'danger' | 'warn' | 'info';
@@ -46,12 +49,6 @@ const rupees = (paise: number) => inr.format(Math.round(paise / 100));
 const h = (n: number) => `${Number(n).toFixed(2).replace(/\.00$/, '')} h`;
 /** A timestamp's calendar date in the studio's timezone. */
 const dateIn = (tz: string, at: Date | string | null) => (at ? localDate(tz, new Date(at)) : null);
-
-function weekdays(from: string, to: string) {
-  let n = 0;
-  for (let d = from; d <= to; d = addDays(d, 1)) { const w = new Date(utc(d)).getUTCDay(); if (w !== 0 && w !== 6) n += 1; }
-  return n;
-}
 
 function staleDays(v: unknown) {
   if (v == null || v === '') return STALE_APPROVAL_DAYS;
@@ -246,7 +243,9 @@ export async function overviewFor(tx: Tx, actor: Actor, asOf: string, tz: string
        and service_date between $2 and $3 and ${ACTUAL_SQL} and ($4::boolean or project_id = any($5::uuid[]))`,
     [personIds, monthFrom, asOf, firmWide, scopeIds],
   )).rows[0].v) : 0;
-  const available = weekdays(monthFrom, asOf) * STANDARD_DAY_HOURS * personIds.length;
+  // Working availability (scheduled - holidays - approved leave) of the people in scope, from the shared definition.
+  const days = await dailyAvailability(tx, personIds, monthFrom, asOf);
+  const available = round2(personIds.reduce((s, id) => s + availableHours(days.get(id) ?? []), 0));
   const utilMissing = [SCHEDULES_MISSING, ...noCost.map((p) => `${p.name} cost rate`)];
 
   attention.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.age_days - a.age_days || a.title.localeCompare(b.title));

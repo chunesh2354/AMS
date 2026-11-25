@@ -23,6 +23,7 @@ import { meRoutes } from './modules/me';
 import { platformRoutes, PLATFORM_PREFIX } from './modules/platform';
 import { overviewRoutes } from './modules/overview';
 import { taskRoutes } from './modules/tasks';
+import { planningRoutes } from './modules/planning';
 
 const PUBLIC = new Set(['/api/v1/auth/login', '/api/v1/health', '/api/v1/auth/accept-invite']);
 export { SESSION_COOKIE };
@@ -102,6 +103,7 @@ export function buildApp(connectionString: string, opts: { secureCookie?: boolea
   overviewRoutes(api);
   meRoutes(api);
   taskRoutes(api);
+  planningRoutes(api);
   platformRoutes(app, pool, opts);
   app.addHook('onClose', async () => { await pool.end(); });
   return app;

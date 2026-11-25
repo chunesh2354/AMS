@@ -6,6 +6,7 @@ import type { Api } from '../../http/api';
 import { hours } from '../../http/responses';
 import { isoDate } from '../../http/validation';
 import { localDate } from '../time/time.routes';
+import { dailyAvailability, loadAllocations, round2, weekLoad } from '../planning/availability';
 
 /**
  * The team member's own pages: Home (/me/home) and Work (/me/work). Everything here is the signed-in person's own
@@ -13,8 +14,6 @@ import { localDate } from '../time/time.routes';
  * permission set holds. Tasks are not in this round, so /me/work returns phases, not tasks.
  */
 
-/** The standard schedule until capacity is modelled: 8 h Monday to Friday, nothing at the weekend (the grid's default). */
-export const SCHEDULED_DAY_HOURS = [8, 8, 8, 8, 8, 0, 0];
 /** How far back "phases I logged time on recently" looks, in days, ending today. */
 export const RECENT_DAYS = 28;
 /** Capabilities that put approvals in a person's queue. Only firm or scoped levels decide anything. */
@@ -65,13 +64,23 @@ export function meRoutes({ get }: Api) {
       [actor.id, start, end],
     )).rows;
     const byDate = new Map(dayRows.map((r) => [r.service_date as string, Number(r.h)]));
-    const days = SCHEDULED_DAY_HOURS.map((scheduled, i) => {
-      const date = addDays(start, i);
-      const h = byDate.get(date) ?? 0;
-      return { date, hours: hours(h), scheduled_hours: hours(scheduled), over_12h: h > OVER_DAY_HOURS };
+    // Scheduled and available hours from the planning capacity (the same numbers as My schedule and the workload grid).
+    const avail = (await dailyAvailability(tx, [actor.id], start, end)).get(actor.id) ?? [];
+    const days = avail.map((a) => {
+      const h = byDate.get(a.date) ?? 0;
+      const leave = a.leave.find((l) => l.status === 'Approved') ?? null;
+      return {
+        date: a.date, hours: hours(h), scheduled_hours: hours(a.scheduled), available_hours: hours(a.available), over_12h: h > OVER_DAY_HOURS,
+        holiday: a.holiday && a.scheduled ? { name: a.holiday.name, half_day: a.holiday.half_day } : null,
+        leave: leave ? { leave_type: leave.leave_type, half_day: leave.half_day } : null,
+      };
     });
     const total = [...byDate.values()].reduce((s, h) => s + h, 0);
-    const scheduledTotal = SCHEDULED_DAY_HOURS.reduce((s, h) => s + h, 0);
+    const scheduledTotal = round2(avail.reduce((s, a) => s + a.scheduled, 0));
+    const availableTotal = round2(avail.reduce((s, a) => s + a.available, 0));
+    // What the published plan has me on this week (drafts are not shown until the planner publishes).
+    const planned = await loadAllocations(tx, 'published', { fromWeek: start, toWeek: start, personIds: [actor.id] });
+    const load = weekLoad(availableTotal, planned);
 
     const thisWeek = await weekSheet(tx, actor.id, start);
     const lastWeek = await weekSheet(tx, actor.id, addDays(start, -7));
@@ -135,7 +144,15 @@ export function meRoutes({ get }: Api) {
         id: timer.id, started_at: timer.started_at, phase_id: timer.phase_id, internal_category_id: timer.internal_category_id,
         project: timer.project_code ? { code: timer.project_code, name: timer.project_name } : null, title: timer.phase_name ?? timer.category_name ?? null,
       },
-      week: { period_start: start, period_end: end, hours: hours(total), scheduled_hours: hours(scheduledTotal), days },
+      week: {
+        period_start: start, period_end: end, hours: hours(total), scheduled_hours: hours(scheduledTotal), available_hours: hours(availableTotal),
+        allocated_hours: hours(load.allocated), conflict: load.conflict,
+        allocations: planned.map((p) => ({
+          id: p.id, project: { id: p.project_id, code: p.project_code, name: p.project_name }, phase: p.phase_id ? { id: p.phase_id, code: p.phase_code, name: p.phase_name } : null,
+          hours: hours(p.hours), state: p.state,
+        })),
+        days,
+      },
       timesheets: { this_week: thisWeek, last_week: lastWeek, notices },
       returned, projects: myProjects, pending, approvals,
     };

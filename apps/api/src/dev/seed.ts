@@ -226,6 +226,49 @@ export async function seed(ownerConn: string, opts: { today?: string } = {}) {
     // 05 Dec 2026 is a Saturday, so the request counts one working day.
     await pendingLeave('P07', '2026-12-04', '2026-12-05', 1, 2);
 
+    // Planning (migration 011). Everyone's 40 h week from January; Sneha Pillai part time (32 h) from 9 Nov, dated after
+    // the overview's seeded window so its utilization figures stay as they were. Two studio holidays in the plan window.
+    for (const [ref] of people) await ins('person_capacity', { person_id: P[ref], effective_from: from, weekly_hours: 40, note: 'Demo seed' });
+    await ins('person_capacity', { person_id: P.P07, effective_from: '2026-11-09', weekly_hours: 32, note: 'Part time, four days a week' });
+    await ins('firm_holiday', { date: '2026-11-20', name: 'Studio holiday', half_day: false });
+    await ins('firm_holiday', { date: '2026-12-25', name: 'Christmas', half_day: false });
+
+    // The plan from the mock planner, weeks from Monday 2 Nov 2026 (the seeded leave dates are fixed, so these are too).
+    // Revision 1 published everything but three cards: the unassigned 5 h on PRJ-01 Concept design, Rohan's tentative
+    // Tender week and Divya's 30 h in the week of 16 Nov. That draft week is her conflict: 40 h - 8 h holiday (20 Nov)
+    // - 4 h half-day leave (18 Nov) = 28 h available, 30 h confirmed, 2 h over. PRJ-03's allocations are retained on hold.
+    const PLAN_FROM = '2026-11-02';
+    const rev = await ins('plan_revision', { revision_no: 1, scope: 'firm', note: 'Demo plan', published_by: P.P01, change_count: 0, created_by: P.P01, published_at: `${addDays(today, -3)}T10:00:00+05:30` });
+    let published = 0;
+    const plan = async (ref: string | null, project: Row, phase: Row, week: number, h: number, state = 'confirmed', isPublished = true, note: string | null = null) => {
+      const row = { project_id: project.id, phase_id: phase.id, person_id: ref ? P[ref] : null, week_start: addDays(PLAN_FROM, week * 7), hours: h, state, note };
+      const a = await ins('allocation', { ...row, created_by: P[project.code === 'PRJ-02' ? 'P03' : 'P02'] });
+      if (isPublished) { await ins('allocation_published', { allocation_id: a.id, ...row, plan_revision_id: rev.id }); published += 1; }
+    };
+    const series = async (ref: string, project: Row, phase: Row, hrs: (number | null)[], state = 'confirmed', note: string | null = null) => {
+      for (const [w, h] of hrs.entries()) if (h != null) await plan(ref, project, phase, w, h, state, true, note);
+    };
+    await plan(null, prj1, ph1.CD, 0, 5, 'tentative', false);
+    await series('P02', prj1, ph1.WD, [24, 24, 20, 24]);
+    await series('P02', prj3, d3, [8, 8, 8, 8], 'confirmed', 'Retained while the project is on hold');
+    await plan('P04', prj1, ph1.CD, 0, 16);
+    await plan('P04', prj1, ph1.WD, 0, 12);
+    await plan('P04', prj1, ph1.CD, 1, 20);
+    await series('P04', prj1, ph1.WD, [null, null, 16, 16]);
+    await plan('P04', prj1, ph1.TN, 4, 16, 'tentative', false);
+    await series('P05', prj1, ph1.WD, [24, 24]);
+    await plan('P05', prj1, ph1.WD, 2, 30, 'confirmed', false);
+    await series('P05', prj1, ph1.WD, [null, null, null, 24]);
+    await series('P05', prj1, ph1.TN, [null, null, null, null, 16, 16, 8], 'tentative');
+    await series('P08', prj1, ph1.WD, [32, 32, 28, 32]);
+    await series('P08', prj1, ph1.TN, [null, null, null, null, 16, 16], 'tentative');
+    await series('P03', prj2, ph2.SD, [24, 24, 24, 24, 24]);
+    await series('P03', prj2, ph2.WD, [null, null, null, null, null, 24], 'tentative');
+    await series('P06', prj2, ph2.SD, [32, 32, 28, 32, 32]);
+    await series('P06', prj2, ph2.WD, [null, null, null, null, null, 32], 'tentative');
+    await series('P07', prj2, ph2.SD, [24, 24, 20, 24, 24, 24]);
+    await db.query('update plan_revision set change_count = $2, project_ids = $3 where id = $1', [rev.id, published, [prj1.id, prj2.id, prj3.id]]);
+
     await db.query('commit');
     return firmId as string;
   } catch (e) {
