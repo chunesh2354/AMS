@@ -11,7 +11,7 @@ import { InlineAlert } from '../../ui/InlineAlert';
 import { PageHeader } from '../../ui/PageHeader';
 import { StatusChip } from '../../ui/StatusChip';
 
-const TABS = ['phases', 'tasks', 'staffing', 'time', 'costs', 'billing', 'changes', 'files', 'activity'];
+const TABS = ['phases', 'tasks', 'timeline', 'staffing', 'time', 'costs', 'billing', 'changes', 'files', 'activity'];
 
 export function ProjectLayout() {
   const { id = '' } = useParams();

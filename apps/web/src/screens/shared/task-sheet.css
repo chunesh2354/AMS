@@ -1,0 +1,35 @@
+/* Task detail sheet, round 2 (approved design AppTaskDetail). Tokens only: scripts/check-colors.mjs. */
+.tsk-red { color: var(--redline); font-weight: 500; }
+.tsk-live { display: flex; flex-direction: column; border-top: 1px solid var(--rule); }
+.tsk-sec { display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.tsk-sec:last-child { border-bottom: 0; }
+.tsk-sec__h { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); }
+
+.tsk-follow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tsk-avs { display: inline-flex; }
+.tsk-avs > * + * { margin-left: -1px; }
+.tsk-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.tsk-chip { display: inline-flex; align-items: center; gap: var(--s-1); padding-left: var(--s-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: var(--text-body-sm); color: var(--ink-1); }
+
+.tsk-hb { position: relative; height: 10px; background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); }
+.tsk-hb__seg { position: absolute; top: 0; bottom: 0; left: 0; }
+.tsk-hb__log { background: var(--ink-body); }
+.tsk-hb__over { background: var(--redline); }
+.tsk-hb__est { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink-1); }
+
+.tsk-chk { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.tsk-chk__i { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); }
+.tsk-chk__i:last-child { border-bottom: 0; }
+.tsk-chk__done { color: var(--ink-2); text-decoration: line-through; }
+
+.tsk-deps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.tsk-dep { display: flex; align-items: flex-start; gap: 10px; padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
+.tsk-dep:last-child { border-bottom: 0; }
+.tsk-dep > .marker { margin-top: 6px; }
+.tsk-dep__b { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.tsk-dep__n { font: 500 14px/1.35 var(--font-sans); color: var(--ink-1); }
+
+.tsk-form { display: flex; flex-direction: column; gap: var(--s-3); }
+.tsk-form__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--s-3); align-items: start; }
+.tsk-inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-2); }
+.tsk-inline > :first-child { flex: 1 1 220px; min-width: 0; }

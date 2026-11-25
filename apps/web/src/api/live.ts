@@ -20,6 +20,7 @@ export const CONNECTED_ROUTES = [
   '/firm/projects/:id/billing',
   '/firm/projects/:id/tasks',
   '/firm/projects/:id/staffing',
+  '/firm/projects/:id/timeline',
   '/firm/workload',
   '/firm/calendar',
   '/firm/approvals',

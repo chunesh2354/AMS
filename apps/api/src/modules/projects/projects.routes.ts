@@ -22,7 +22,7 @@ export async function findProject(tx: Tx, code: string) {
   return p;
 }
 
-async function phasesOf(tx: Tx, projectId: string) {
+export async function phasesOf(tx: Tx, projectId: string) {
   return (await tx.query(
     `select ph.*, o.ref_code as owner_ref, o.name as owner_name,
        coalesce((select sum(bl.hours) from budget_line bl join budget_version bv on bv.id = bl.budget_version_id where bl.phase_id = ph.id and bv.status = 'Approved'), 0) as budget_hours,
@@ -33,7 +33,7 @@ async function phasesOf(tx: Tx, projectId: string) {
 }
 
 /** Four separate values (R9). Delivery progress lives on the phase and never feeds these. */
-async function entitlementOf(tx: Tx, projectId: string) {
+export async function entitlementOf(tx: Tx, projectId: string) {
   const contracted = (await tx.query(`select coalesce(sum(coalesce(contracted_amount, cap_amount, 0)), 0) as v from fee_component where project_id = $1`, [projectId])).rows[0].v;
   const auth = (await tx.query(
     `select a.amount, (select max(f.cumulative_percent) from fee_authorization f where f.phase_fee_allocation_id = a.id) as pct
@@ -54,7 +54,7 @@ async function entitlementOf(tx: Tx, projectId: string) {
 }
 
 /** Labour cost at the rate stored at approval. A gap is listed, never counted as zero (R22). */
-async function labourOf(tx: Tx, projectId: string) {
+export async function labourOf(tx: Tx, projectId: string) {
   const rows = (await tx.query(
     `select te.person_id, p.name, te.duration_hours, r.amount as cost_rate from time_entry te join person p on p.id = te.person_id
      left join rate_schedule r on r.id = te.cost_rate_schedule_id where te.project_id = $1 and ${ACTUAL_SQL.replace(/approval_state/g, 'te.approval_state').replace(/billing_state/g, 'te.billing_state')}`, [projectId],

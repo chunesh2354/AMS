@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { getProjectPhaseOptions, getTimesheet, type TimesheetLineData } from '../../api';
 import { useResource } from '../../api/useResource';
 import { apiFetch, failureMessage, isLive } from '../../api/live';
-import { cellDate, classification, correctEntry, getMyTime, getPhaseOptions, putCell, startTimer, stopTimer, submitWeek, type LiveLineMeta, type LiveTimesheet } from '../../api/live/time';
+import { cellDate, classification, correctEntry, getPhaseOptions, stopTimer, submitWeek, type LiveLineMeta } from '../../api/live/time';
+import { getMyTimeWithTasks, putTaskCell, startTaskTimer, type LiveTimesheetWithTasks } from '../../api/live/tasks';
 import type { ProjectPhaseOption } from '../../ui/ProjectPhasePicker';
 import { useOverlays } from '../../app/overlays';
 import { useSession, useTimer } from '../../app/session';
@@ -35,8 +36,8 @@ export function MyTimeScreen() {
   const toast = useToast();
   const { openLogTime } = useOverlays();
   const [offset, setOffset] = useState(0);
-  const { state, data, retry } = useResource(() => (isLive ? getMyTime(offset) : getTimesheet(viewer.id, offset)), [viewer.id, offset]);
-  const live = isLive ? (data as LiveTimesheet | null) : null;
+  const { state, data, retry } = useResource(() => (isLive ? getMyTimeWithTasks(offset) : getTimesheet(viewer.id, offset)), [viewer.id, offset]);
+  const live = isLive ? (data as LiveTimesheetWithTasks | null) : null;
   const [projects, setProjects] = useState<ProjectPhaseOption[]>(isLive ? [] : mockProjects);
   const [extraMeta, setExtraMeta] = useState<Record<string, LiveLineMeta>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -44,6 +45,12 @@ export function MyTimeScreen() {
   const metaOf = (id: string) => live?.meta[id] ?? extraMeta[id];
   const phaseInfo = (id: string | null) => phaseInfoIn(projects, id);
   const clsOf = (m: LiveLineMeta | undefined) => (m?.phaseId ? { phase_id: m.phaseId } : m?.internalCategoryId ? { internal_category_id: m.internalCategoryId } : null);
+  /** A task line (API key phase:task) writes to its task; a phase line holds only the time that is on no task. */
+  const lineCls = (id: string) => {
+    const cls = clsOf(metaOf(id));
+    const t = live?.tasks[id];
+    return cls && t && cls.phase_id ? { ...cls, task_id: t.taskId } : cls;
+  };
   const [lines, setLines] = useState<TimesheetLineData[]>([]);
   const [status, setStatus] = useState<Status>('Not submitted');
   const [picking, setPicking] = useState<{ lineId: string | null } | null>(null);
@@ -70,9 +77,9 @@ export function MyTimeScreen() {
   const change = (id: string, c: number, h: number) => {
     if (live) {
       const m = metaOf(id);
-      const cls = clsOf(m);
+      const cls = lineCls(id);
       const body = cls ?? { entry_id: m?.entries.find((e) => e.service_date.slice(0, 10) === cellDate(live.period, c))?.id };
-      putCell({ service_date: cellDate(live.period, c), duration_hours: h, ...body }).then(retry, (e) => toast({ variant: 'danger', message: failureMessage(e) }));
+      putTaskCell({ service_date: cellDate(live.period, c), duration_hours: h, ...body }).then(retry, (e) => toast({ variant: 'danger', message: failureMessage(e) }));
       return;
     }
     mockChange(id, c, h);
@@ -132,9 +139,9 @@ export function MyTimeScreen() {
   const timerStart = () => {
     if (!live) { timer.start(); return; }
     const l = lines.find((x) => clsOf(metaOf(x.id)) && x.state !== 'locked');
-    const cls = l ? clsOf(metaOf(l.id)) : null;
+    const cls = l ? lineCls(l.id) : null;
     if (!l || !cls) { toast({ variant: 'warn', message: 'Add a project line before starting a timer.' }); return; }
-    startTimer(cls).then(() => timer.start(`${l.subtitle ?? ''} · ${l.title}`), (e) => toast({ variant: 'danger', message: failureMessage(e) }));
+    startTaskTimer(cls).then(() => timer.start(`${l.subtitle ?? ''} · ${l.title}`), (e) => toast({ variant: 'danger', message: failureMessage(e) }));
   };
   const timerStop = () => {
     if (!live) { timer.stop(); return; }
