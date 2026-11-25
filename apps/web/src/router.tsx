@@ -12,6 +12,7 @@ import { ProjectOverviewScreen } from './screens/firm/project/overview';
 import { ProjectPhasesScreen } from './screens/firm/project/phases';
 import { ProjectStaffingScreen } from './screens/firm/project/staffing';
 import { ProjectTasksScreen } from './screens/firm/project/tasks';
+import { ProjectTimelineScreen } from './screens/firm/project/timeline';
 import { ProjectActivityScreen } from './screens/firm/project/activity';
 import { ProjectChangesScreen } from './screens/firm/project/changes';
 import { ProjectCostsScreen } from './screens/firm/project/costs';
@@ -81,6 +82,7 @@ export const routes: RouteObject[] = [
             { index: true, element: <ProjectOverviewScreen /> },
             { path: 'phases', element: <ProjectPhasesScreen /> },
             { path: 'tasks', element: <ProjectTasksScreen /> },
+            { path: 'timeline', element: <ProjectTimelineScreen /> },
             { path: 'staffing', element: <ProjectStaffingScreen /> },
             { path: 'time', element: <ProjectTimeScreen /> },
             { path: 'costs', element: <ProjectCostsScreen /> },

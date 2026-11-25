@@ -8,7 +8,7 @@ import { isoDate, uuidParam } from '../../http/validation';
 import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
 import { findProject } from '../projects';
-import { assertDateOrder, bad, loadTask, mayPlan, taskView } from '../tasks/tasks.routes';
+import { assertDateOrder, bad, followersToTell, loadTask, mayPlan, taskView } from '../tasks/tasks.routes';
 import { lockProject, projectEdges } from '../tasks/relations.routes';
 import { cascade, daysFrom, shift, violations, type GraphTask } from './graph';
 import { firmClock, plansFor, SCHEDULE_DEFINITION } from './plan';
@@ -75,7 +75,7 @@ async function applyTaskMoves(tx: Tx, actor: Actor, firmId: string, project: any
     const text = `${actor.name} rescheduled "${r.title}" on ${project.code}: ${when}.`;
     const to = new Set<string>();
     if (r.assignee_id) to.add(r.assignee_id);
-    for (const f of (await tx.query('select person_id from task_follower where task_id = $1', [r.id])).rows) to.add(f.person_id);
+    for (const id of await followersToTell(tx, firmId, { id: r.id, assignee_id: r.assignee_id, project_id: project.id })) to.add(id);
     to.delete(actor.id);
     for (const p of to) await notify(tx, firmId, p, 'task_rescheduled', text, { type: 'task', id: r.id });
   }

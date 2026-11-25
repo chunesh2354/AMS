@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FolderKanban } from 'lucide-react';
 import { getPeople, getProjects, personName, type ProjectView } from '../../api';
 import { CreateProjectSheet } from './create-project-sheet';
+import { ProjectHealthView } from './project-health';
+import { StudioTimelineView } from './project/timeline-studio';
 import { useResource } from '../../api/useResource';
 import { apiFetch, isLive, type ListResponse } from '../../api/live';
 import { mapProject, type ApiProject, type LiveProjectView } from '../../api/live/projects';
@@ -13,11 +15,14 @@ import { Button } from '../../ui/Button';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { FilterBar, type FilterDef } from '../../ui/FilterBar';
 import { PageHeader } from '../../ui/PageHeader';
+import { Segmented } from '../../ui/Segmented';
 import { StatusChip } from '../../ui/StatusChip';
 import { formatGrouped } from '../../ui/format';
 
 const opts = (v: string[]) => [...new Set(v)].sort().map((x) => ({ value: x, label: x }));
 const slug = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+type View = 'list' | 'timeline' | 'health';
+const VIEWS: { value: View; label: string }[] = [{ value: 'list', label: 'List' }, { value: 'timeline', label: 'Timeline' }, { value: 'health', label: 'Health' }];
 
 /** A live row keeps the PM's name from GET /projects: ref codes (P01...) repeat the sample studio's, so they must never be looked up there. */
 export type ProjectRow = ProjectView & { pmName?: string };
@@ -28,7 +33,9 @@ const getLiveProjectRows = async (): Promise<ProjectRow[]> => (await apiFetch<Li
 export function ProjectsScreen() {
   const navigate = useNavigate();
   const { viewer } = useSession();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('view') === 'timeline' || params.get('view') === 'health' ? (params.get('view') as View) : 'list';
+  const setView = (v: View) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'list') n.delete('view'); else n.set('view', v); return n; });
   const [creating, setCreating] = useState(params.get('new') === '1');
   const people = useResource(getPeople, []);
   const { state, data, retry } = useResource<ProjectRow[]>(() => (isLive ? getLiveProjectRows() : getProjects(viewer)), [viewer.id]);
@@ -71,12 +78,19 @@ export function ProjectsScreen() {
         meta={state !== 'loading' && <span className="t-numeric ink-2">{projects.length} projects</span>}
         primaryAction={<Button variant="primary" onClick={() => setCreating(true)}>Create project</Button>}
       />
-      <FilterBar filters={filters} />
-      <DataTable
-        label="Projects" columns={columns} rows={state === 'empty' ? [] : rows} rowKey={(p) => p.code} state={state === 'ready' && !rows.length ? 'empty' : state}
-        onRetry={retry} capability="view projects" columnPicker onRowClick={(p) => navigate(`/firm/projects/${p.code}`)}
-        empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> }}
-      />
+      <div><Segmented label="View" options={VIEWS} value={view} onChange={setView} /></div>
+      {view === 'list' && (
+        <>
+          <FilterBar filters={filters} />
+          <DataTable
+            label="Projects" columns={columns} rows={state === 'empty' ? [] : rows} rowKey={(p) => p.code} state={state === 'ready' && !rows.length ? 'empty' : state}
+            onRetry={retry} capability="view projects" columnPicker onRowClick={(p) => navigate(`/firm/projects/${p.code}`)}
+            empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> }}
+          />
+        </>
+      )}
+      {view === 'timeline' && <StudioTimelineView />}
+      {view === 'health' && <ProjectHealthView />}
       <CreateProjectSheet open={creating} onClose={() => setCreating(false)} people={people.data ?? []} />
     </>
   );

@@ -25,6 +25,8 @@ import { TextArea } from '../../../ui/TextArea';
 import { TextField } from '../../../ui/TextField';
 import { useToast } from '../../../ui/Toast';
 import { formatDate } from '../../../ui/format';
+import { NumberField } from '../../../ui/NumberField';
+import { LiveTaskDetailSections } from '../../shared/task-sheet';
 import { ProjectTeamPanel } from './staffing';
 
 const STATUS_OPTIONS = TASK_STATUSES.map((s) => ({ value: s, label: s }));
@@ -94,7 +96,9 @@ export function LiveProjectTasksScreen() {
     return n;
   }, { replace: true });
 
-  const blocked = tasks.filter((t) => t.status === 'Blocked').length;
+  // Sub-tasks live on their parent's sheet, not on the board or in the count.
+  const top = useMemo(() => tasks.filter((t) => !t.parent_task_id), [tasks]);
+  const blocked = top.filter((t) => t.status === 'Blocked').length;
   const addButton = canPlan ? <Button variant="primary" onClick={() => setEditing('new')}>New task</Button> : undefined;
   const columns: Column<LiveTask>[] = [
     { key: 'title', header: 'Task', value: (t) => t.title, sortable: true },
@@ -109,14 +113,14 @@ export function LiveProjectTasksScreen() {
         : <TaskStatusChip status={t.status} />),
     },
   ];
-  const effective = state === 'ready' && !tasks.length ? 'empty' : state;
+  const effective = state === 'ready' && !top.length ? 'empty' : state;
 
   return (
     <>
       <div className="toolbar toolbar--between">
         <div className="toolbar">
           <h2 className="t-h2">Tasks</h2>
-          {state === 'ready' && <span className="t-numeric ink-2">{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}, {blocked} blocked</span>}
+          {state === 'ready' && <span className="t-numeric ink-2">{top.length} {top.length === 1 ? 'task' : 'tasks'}, {blocked} blocked</span>}
         </div>
         <div className="toolbar">
           {view === 'list' && <Segmented label="Group by" value={group} onChange={(v) => setParam('group', v, 'status')} options={[{ value: 'status', label: 'Status' }, { value: 'phase', label: 'Phase' }]} />}
@@ -131,12 +135,12 @@ export function LiveProjectTasksScreen() {
             <KanbanBoard
               label="Task board" itemKey={(t) => t.id} itemLabel={(t) => t.title} renderCard={(t) => <TaskCard task={t} />} onOpen={setEditing}
               onMove={(t, to) => void changeStatus(t, to)}
-              columns={TASK_STATUSES.map((s) => ({ key: s, label: s, items: tasks.filter((t) => t.status === s), emptyText: 'Nothing here.' }))}
+              columns={TASK_STATUSES.map((s) => ({ key: s, label: s, items: top.filter((t) => t.status === s), emptyText: 'Nothing here.' }))}
             />
           )
           : (
             <DataTable
-              label="Tasks" columns={columns} rows={tasks} rowKey={(t) => t.id} onRowClick={setEditing} density="dense"
+              label="Tasks" columns={columns} rows={top} rowKey={(t) => t.id} onRowClick={setEditing} density="dense"
               groupBy={group === 'phase' ? phaseLabel : (t) => t.status}
             />
           )}
@@ -166,9 +170,9 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
   const isNew = task === 'new';
   const existing = task && task !== 'new' ? task : null;
   const planner = isNew ? canPlan : !!existing?.can_edit;
-  const [form, setForm] = useState<{ title: string; phase: string | null; assignee: string | null; due: string | null; priority: TaskPriority; status: TaskStatus; description: string }>(
-    { title: '', phase: null, assignee: null, due: null, priority: 'Normal', status: 'To do', description: '' },
-  );
+  type FormState = { title: string; phase: string | null; assignee: string | null; start: string | null; due: string | null; estimate: string; priority: TaskPriority; status: TaskStatus; description: string };
+  const blank: FormState = { title: '', phase: null, assignee: null, start: null, due: null, estimate: '', priority: 'Normal', status: 'To do', description: '' };
+  const [form, setForm] = useState<FormState>(blank);
   const [note, setNote] = useState('');
   const [detail, setDetail] = useState<LiveTaskDetail | null>(null);
   const [team, setTeam] = useState<ProjectMember[]>([]);
@@ -185,8 +189,11 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
     let live = true;
     setTried(false); setError(null); setNote(''); setShowAll(false); setConfirmDelete(false); setDetail(null);
     setForm(existing
-      ? { title: existing.title, phase: existing.phase?.id ?? null, assignee: existing.assignee?.id ?? null, due: existing.due_date, priority: existing.priority, status: existing.status, description: existing.description ?? '' }
-      : { title: '', phase: null, assignee: null, due: null, priority: 'Normal', status: 'To do', description: '' });
+      ? {
+        title: existing.title, phase: existing.phase?.id ?? null, assignee: existing.assignee?.id ?? null, start: existing.start_date ?? null, due: existing.due_date,
+        estimate: existing.estimate_hours != null ? String(Number(existing.estimate_hours)) : '', priority: existing.priority, status: existing.status, description: existing.description ?? '',
+      }
+      : blank);
     if (existing) getTask(existing.id).then((d) => { if (live) setDetail(d); }, () => {});
     if (planner) {
       // The team is read each time the sheet opens, so someone just added on the team panel is in the picker.
@@ -218,14 +225,19 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   const canStatus = isNew ? canPlan : !!existing?.can_change_status;
 
+  const estimate = form.estimate.trim() === '' ? null : Number(form.estimate);
+  const estimateError = estimate != null && (!Number.isFinite(estimate) || estimate < 0 || Math.abs(estimate * 100 - Math.round(estimate * 100)) > 1e-6) ? 'Enter hours from 0, with at most two decimals' : undefined;
+  const orderError = form.start && form.due && form.start > form.due ? 'The start must be on or before the due date' : undefined;
   const save = async () => {
-    if (planner && !form.title.trim()) { setTried(true); return; }
+    if (planner && (!form.title.trim() || estimateError || orderError)) { setTried(true); return; }
     setBusy('save'); setError(null);
     try {
       let body: TaskInput;
       if (planner) {
         body = {
           title: form.title.trim(), phase_id: form.phase, assignee_id: form.assignee, due_date: form.due, priority: form.priority,
+          ...(isNew ? (form.start ? { start_date: form.start } : {}) : form.start !== (existing!.start_date ?? null) ? { start_date: form.start } : {}),
+          ...(isNew ? (estimate != null ? { estimate_hours: estimate } : {}) : estimate !== (existing!.estimate_hours != null ? Number(existing!.estimate_hours) : null) ? { estimate_hours: estimate } : {}),
           description: form.description.trim() || null, status: form.status, ...(joining ? { add_to_team: true } : {}),
         };
         if (note.trim()) body.note = note.trim();
@@ -261,10 +273,10 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
   );
   const notes = detail?.notes ?? [];
   return (
-    <Sheet open onClose={onClose} title={title} description={existing ? `${existing.project.code} · ${phaseLabel(existing)}` : undefined} footer={footer} dirty={isNew ? form.title !== '' : note !== ''}>
+    <Sheet open onClose={onClose} size={640} title={title} description={existing ? `${existing.project.code} · ${phaseLabel(existing)}` : undefined} footer={footer} dirty={isNew ? form.title !== '' : note !== ''}>
       <Form onSubmit={(e) => { e.preventDefault(); void save(); }}>
         {error && <InlineAlert variant="danger" title={error} />}
-        {confirmDelete && <InlineAlert variant="warn" title="Delete this task? Its notes go with it. Select Confirm delete to go ahead." />}
+        {confirmDelete && <InlineAlert variant="warn" title="Delete this task? Its notes, sub-tasks, dependencies and followers go with it; time logged on it stays on its phase. Select Confirm delete to go ahead." />}
         {planner
           ? (
             <FormSection>
@@ -276,7 +288,9 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
                 empty={showAll ? 'Nobody matches.' : 'Nobody on the team matches. Tick "Include people not on the team".'}
               />
               <Checkbox label="Include people not on the team" description="Anyone you assign from outside the team is added to it as a contributor." checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+              <DateField label="Start" value={form.start} onChange={(v) => set('start', v)} error={tried ? orderError : undefined} />
               <DateField label="Due" value={form.due} onChange={(v) => set('due', v)} />
+              <NumberField label="Estimate (hours)" value={form.estimate} onChange={(e) => set('estimate', e.target.value)} error={tried ? estimateError : undefined} helper="Optional" />
               <Select label="Priority" options={PRIORITY_OPTIONS} value={form.priority} onChange={(v) => set('priority', v as TaskPriority)} />
               <Select label="Status" options={STATUS_OPTIONS} value={form.status} onChange={(v) => set('status', v as TaskStatus)} />
               <TextArea label="Description" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} maxLength={4000} />
@@ -304,6 +318,8 @@ export function TaskSheet({ code, task, canPlan, teamVersion, onClose, onSaved, 
           </FormSection>
         )}
       </Form>
+      {/* Outside the form: each part saves through its own endpoint, and Enter in them never submits the sheet's Save. */}
+      {existing && <LiveTaskDetailSections task={existing} team={team.map((m) => ({ id: m.person.id, name: m.person.name, title: m.person.job_title ?? undefined }))} />}
     </Sheet>
   );
 }

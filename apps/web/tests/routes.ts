@@ -13,6 +13,7 @@ export const READY = [
   '/firm/people/P05?tab=rates', '/firm/people/P05?tab=rates&as=P02', '/firm/people/P05?tab=activity',
   '/firm/projects/PRJ-01?as=P02', '/firm/projects/PRJ-03', '/firm/projects/PRJ-01/tasks?view=list', '/firm/projects/PRJ-02/billing?as=P02', '/firm/billing?as=P02', '/firm/receivables?as=P02',
   '/firm/pipeline?view=list', '/firm/proposals/PROP-02', '/firm/proposals/OPP-02',
+  '/firm/projects/PRJ-01/timeline', '/firm/projects/PRJ-01/timeline?as=P05', '/firm/projects?view=timeline', '/firm/projects?view=health', '/firm/projects?view=health&as=P02',
   ...['contribution', 'budget-vs-actual', 'fee-entitlement', 'work-in-progress', 'receivables-ageing', 'timesheet-compliance'].map((k) => `/firm/reports/${k}`), '/firm/reports/contribution?as=P02', '/firm/reports/utilization?as=P02',
   ...['profile', 'calendars', 'work-categories', 'templates', 'approval-policies', 'imports', 'imports?step=2', 'imports?step=3', 'imports?step=4'].map((k) => `/firm/settings/${k}`), '/firm/settings/profile?as=P02',
   ...TEAM_LISTS, '/me/work?as=P04&view=board', '/me/time?as=P08', '/me/profile?as=P04&section=personal',

@@ -219,6 +219,27 @@ describe('followers', () => {
     expect(other.body.followers.map((x: any) => x.id).sort()).toEqual([f.id('P02'), f.id('P08')].sort());
     expect((await f.owner.query(`select count(*)::int n from audit_event where record_type = 'task' and record_id = $1 and action = 'unfollow'`, [t])).rows[0].n).toBe(2);
   });
+
+  it('a follower who has left the project team is no longer told about the task', async () => {
+    const stair = await mk('Stair core detail', { assignee_id: f.id('P08'), due_date: '2027-02-10' });
+    expect((await f.call('P02', 'POST', `/tasks/${stair}/followers`, { person_id: f.id('P04') })).status).toBe(200);
+    expect((await f.call('P02', 'POST', `/tasks/${stair}/followers`, { person_id: f.id('P05') })).status).toBe(200);
+    expect((await f.call('P02', 'DELETE', `/projects/PRJ-01/members/${f.id('P05')}`)).status).toBe(200);
+    try {
+      expect((await f.call('P08', 'PUT', `/tasks/${stair}`, { status: 'In progress', note: 'Started' })).status).toBe(200);
+      expect((await f.call('P02', 'PUT', `/tasks/${stair}/dates`, { due_date: '2027-02-12', cascade: true })).status).toBe(200);
+      // Still on the team: told about each change.
+      // (Sorted: the status change and the note come from one request, so they share a created_at.)
+      expect((await notes(f, 'P04', stair)).map((n) => n.event_type).sort()).toEqual(['task_followed', 'task_note_added', 'task_rescheduled', 'task_status_changed']);
+      // Off the team: only the "added you" notice from before, nothing about a project they can no longer open.
+      expect((await notes(f, 'P05', stair)).map((n) => n.event_type)).toEqual(['task_followed']);
+      // The follow row stays, so the planner sees it and can remove it; the person can still unfollow themselves.
+      expect((await f.call('P02', 'GET', `/tasks/${stair}`)).body.followers.map((x: any) => x.id)).toContain(f.id('P05'));
+      expect((await f.call('P05', 'DELETE', `/tasks/${stair}/followers`)).body).toMatchObject({ following: false, removed: true });
+    } finally {
+      await f.call('P02', 'POST', '/projects/PRJ-01/members', { person_id: f.id('P05'), role: 'contributor' });
+    }
+  });
 });
 
 describe('time on tasks', () => {

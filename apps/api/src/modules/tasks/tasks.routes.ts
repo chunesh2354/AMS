@@ -3,8 +3,8 @@ import { ACTUAL_SQL } from '../projects/projects.routes';
 import { ApiError, notFound, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { notify } from '../../audit/notify';
-import { assertProjectVisible, authorize, can } from '../../auth/authorize';
-import type { Actor } from '../../auth/actor';
+import { assertProjectVisible, authorize, can, visibleProjects } from '../../auth/authorize';
+import { loadActor, type Actor } from '../../auth/actor';
 import { hours, list } from '../../http/responses';
 import { isoDate, isUuid, required, uuidParam } from '../../http/validation';
 import type { Tx } from '../../db/pool';
@@ -206,13 +206,35 @@ export async function followersOf(tx: Tx, taskId: string) {
   )).rows.map((r) => ({ id: r.id as string, ref_code: r.ref_code as string, name: r.name as string, since: r.created_at }));
 }
 
+/** Can this person see the task now (its assignee, or able to see the project)? */
+export async function personSeesTask(tx: Tx, firmId: string, personId: string, t: { assignee_id: string | null; project_id: string }) {
+  if (t.assignee_id === personId) return true;
+  const other = await loadActor(tx, personId, firmId, '');
+  const v = visibleProjects(other);
+  return v === 'all' || v.includes(t.project_id);
+}
+
+/**
+ * The followers who may still be told about the task. A follower who has since left the project team (or the
+ * studio, or whose account is deactivated) keeps the follow row, so a planner can see and remove it, but is not told:
+ * the notification would show them a task and a project they can no longer open.
+ */
+export async function followersToTell(tx: Tx, firmId: string, t: { id: string; assignee_id: string | null; project_id: string }) {
+  const rows = (await tx.query(
+    `select f.person_id from task_follower f join person p on p.id = f.person_id
+     where f.task_id = $1 and p.employment_state <> 'Ended' and p.login_state <> 'Revoked'`, [t.id],
+  )).rows.map((r) => r.person_id as string);
+  const out: string[] = [];
+  for (const id of rows) if (await personSeesTask(tx, firmId, id, t)) out.push(id);
+  return out;
+}
+
 /** Tells the task's followers, except the actor and anyone in `skip` (already told about this change). */
-export async function tellFollowers(tx: Tx, actor: Actor, firmId: string, taskId: string, eventType: string, message: string, skip: Set<string> = new Set()) {
-  const ids = (await tx.query('select person_id from task_follower where task_id = $1', [taskId])).rows.map((r) => r.person_id as string);
-  for (const id of ids) {
+export async function tellFollowers(tx: Tx, actor: Actor, firmId: string, t: { id: string; assignee_id: string | null; project_id: string }, eventType: string, message: string, skip: Set<string> = new Set()) {
+  for (const id of await followersToTell(tx, firmId, t)) {
     if (id === actor.id || skip.has(id)) continue;
     skip.add(id);
-    await notify(tx, firmId, id, eventType, message, { type: 'task', id: taskId });
+    await notify(tx, firmId, id, eventType, message, { type: 'task', id: t.id });
   }
 }
 
@@ -363,9 +385,9 @@ export function taskRoutes({ get, post, put, del }: Api) {
     // Followers hear about status changes and new notes: one notification per kind, never to the actor, and not a
     // second status notice to a creator who was just told above.
     if (changed.includes('status')) {
-      await tellFollowers(tx, actor, firmId, prev.id, 'task_status_changed', `${actor.name} moved "${next.title}" on ${prev.project_code} from ${prev.status} to ${next.status}.`, told);
+      await tellFollowers(tx, actor, firmId, { id: prev.id, assignee_id: next.assignee_id, project_id: prev.project_id }, 'task_status_changed', `${actor.name} moved "${next.title}" on ${prev.project_code} from ${prev.status} to ${next.status}.`, told);
     }
-    if (note) await tellFollowers(tx, actor, firmId, prev.id, 'task_note_added', `${actor.name} added a note to "${next.title}" on ${prev.project_code}.`);
+    if (note) await tellFollowers(tx, actor, firmId, { id: prev.id, assignee_id: next.assignee_id, project_id: prev.project_id }, 'task_note_added', `${actor.name} added a note to "${next.title}" on ${prev.project_code}.`);
     return { ...taskView(actor, await loadTask(tx, prev.id)), notes: await notesOf(tx, prev.id), added_to_team: added, audit_event_id };
   });
 

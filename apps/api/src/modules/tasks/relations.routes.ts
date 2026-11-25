@@ -1,15 +1,15 @@
 import { ApiError, conflict, notFound, ruleError } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { notify } from '../../audit/notify';
-import { assertProjectVisible, authorize, visibleProjects } from '../../auth/authorize';
-import { loadActor, type Actor } from '../../auth/actor';
+import { assertProjectVisible, authorize } from '../../auth/authorize';
+import type { Actor } from '../../auth/actor';
 import { list } from '../../http/responses';
 import { isUuid, uuidParam } from '../../http/validation';
 import type { Tx } from '../../db/pool';
 import type { Api, Ctx } from '../../http/api';
 import { findProject } from '../projects';
 import { reaches, type GraphEdge } from '../schedule/graph';
-import { assertTaskVisible, bad, createTask, followersOf, loadTask, mayPlan, taskDetail, taskView, TASK_SQL } from './tasks.routes';
+import { assertTaskVisible, bad, createTask, followersOf, loadTask, mayPlan, personSeesTask, taskDetail, taskView, TASK_SQL } from './tasks.routes';
 
 /**
  * Sub-tasks, dependencies and followers (migration 012).
@@ -40,14 +40,6 @@ async function plannerTask(tx: Tx, actor: Actor, id: string) {
   assertProjectVisible(actor, t.project_id);
   authorize(actor, 'projects.plan', { projectId: t.project_id });
   return t;
-}
-
-/** Can this person see the task (its assignee, or able to see the project)? */
-async function personSeesTask(tx: Tx, firmId: string, personId: string, t: any) {
-  if (t.assignee_id === personId) return true;
-  const other = await loadActor(tx, personId, firmId, '');
-  const v = visibleProjects(other);
-  return v === 'all' || v.includes(t.project_id);
 }
 
 function lagOf(v: unknown) {
