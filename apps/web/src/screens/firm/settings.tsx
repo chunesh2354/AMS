@@ -2,12 +2,15 @@ import { useMemo, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { getImportPreview, getIntegrations, getSettingsLists, type ImportRow } from '../../api';
 import { useResource } from '../../api/useResource';
-import { isLive } from '../../api/live';
+import { ApiFailure, failureMessage, isLive } from '../../api/live';
+import { addHoliday, getHolidays, removeHoliday, type LiveHoliday } from '../../api/live/calendar';
 import { canSeeRates, canUseSettings, useSession, type Viewer } from '../../app/session';
 import { FIRM_NAME, PEOPLE } from '../../mock/studio-meridian';
 import { SettingsLayout } from '../../layouts/SettingsLayout';
 import { WizardLayout } from '../../layouts/WizardLayout';
 import { Button } from '../../ui/Button';
+import { Checkbox } from '../../ui/Checkbox';
+import { DateField } from '../../ui/DateField';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { FileDrop } from '../../ui/FileDrop';
 import { Form, FormFooter, FormSection } from '../../ui/Form';
@@ -22,6 +25,7 @@ import { Skeleton } from '../../ui/Skeleton';
 import { StatusChip } from '../../ui/StatusChip';
 import { TextField } from '../../ui/TextField';
 import { useToast } from '../../ui/Toast';
+import { formatDate } from '../../ui/format';
 import { GoTo } from '../shared/go-to';
 import { AccountsSettings } from './accounts';
 import { ApprovalsSettings } from './approvals-settings';
@@ -189,8 +193,99 @@ function Imports() {
   );
 }
 
+// ---------- Calendars (live): studio holidays from /holidays ----------
+
+const HOLIDAY_MANAGE = 'Only people who manage studio settings can add or remove holidays.';
+
+function CalendarsSettings() {
+  const toast = useToast();
+  const { state, data, retry } = useResource(getHolidays, []);
+  const [date, setDate] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [halfDay, setHalfDay] = useState(false);
+  const [tried, setTried] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState<LiveHoliday | null>(null);
+  const [busy, setBusy] = useState(false);
+  const rows = data?.data ?? [];
+  const canManage = !!data?.can_manage;
+
+  const add = async () => {
+    setTried(true); setDateError(null); setFormError(null);
+    if (!date || !name.trim()) return;
+    setSaving(true);
+    try {
+      const h = await addHoliday({ date, name: name.trim(), half_day: halfDay });
+      toast({ variant: 'success', message: `${h.name} on ${formatDate(h.date)} is a studio holiday.` });
+      setDate(null); setName(''); setHalfDay(false); setTried(false);
+      retry();
+    } catch (e) {
+      if (e instanceof ApiFailure && e.code === 'HOLIDAY_EXISTS') setDateError('There is already a holiday on this date');
+      else setFormError(failureMessage(e));
+    } finally { setSaving(false); }
+  };
+  const remove = async (h: LiveHoliday) => {
+    setBusy(true);
+    try {
+      await removeHoliday(h.id);
+      toast({ variant: 'success', message: `${h.name} on ${formatDate(h.date)} is no longer a studio holiday.` });
+      setRemoving(null);
+      retry();
+    } catch (e) {
+      toast({ variant: 'danger', message: failureMessage(e) });
+    } finally { setBusy(false); }
+  };
+
+  const columns: Column<LiveHoliday>[] = [
+    { key: 'date', header: 'Date', type: 'date', value: (h) => h.date },
+    { key: 'name', header: 'Name', value: (h) => h.name },
+    { key: 'half', header: 'Length', value: (h) => (h.half_day ? 'Half day' : 'Whole day') },
+    ...(canManage ? [{
+      key: 'remove', header: 'Actions', value: () => '',
+      render: (h: LiveHoliday) => <Button size="dense" variant="ghost" aria-label={`Remove ${h.name}, ${formatDate(h.date)}`} onClick={() => setRemoving(h)}>Remove</Button>,
+    }] : []),
+  ];
+  return (
+    <div className="solid-panel settings__panel">
+      <div>
+        <h2 className="t-h2">Calendars</h2>
+        <p className="t-body-sm ink-2">Studio holidays take the day (or half of it) off everyone&apos;s available hours on the workload, the planner and the calendar. Weekly hours are spread over Monday to Friday.</p>
+      </div>
+      {removing && (
+        <InlineAlert variant="warn" title={`Remove ${removing.name} on ${formatDate(removing.date)}?`}>
+          <span className="chip-row">
+            Everyone&apos;s available hours that day go back up.
+            <Button size="dense" variant="danger" loading={busy} onClick={() => remove(removing)}>Remove holiday</Button>
+            <Button size="dense" variant="ghost" onClick={() => setRemoving(null)}>Keep it</Button>
+          </span>
+        </InlineAlert>
+      )}
+      <DataTable
+        label="Studio holidays" columns={columns} rows={rows} rowKey={(h) => h.id}
+        state={state === 'ready' && !rows.length ? 'empty' : state} onRetry={retry} capability="view studio holidays"
+        empty={{ message: canManage ? 'No studio holidays yet. Add the first one below.' : 'No studio holidays are set.' }}
+      />
+      {state === 'ready' && (canManage
+        ? (
+          <Form onSubmit={(e) => { e.preventDefault(); void add(); }} aria-label="Add a holiday">
+            <FormSection title="Add a holiday" columns={2}>
+              <DateField label="Date" value={date} onChange={(d) => { setDate(d); setDateError(null); }} error={dateError ?? (tried && !date ? 'Choose a date' : undefined)} />
+              <TextField label="Name" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} error={tried && !name.trim() ? 'Enter a name' : undefined} />
+              <Checkbox label="Half day" description="Takes half the day off available hours." checked={halfDay} onChange={(e) => setHalfDay(e.target.checked)} />
+            </FormSection>
+            {formError && <InlineAlert variant="danger" title={formError} />}
+            <FormFooter><Button type="submit" variant="primary" loading={saving}>Add holiday</Button></FormFooter>
+          </Form>
+        )
+        : <p className="t-body-sm ink-2">{HOLIDAY_MANAGE}</p>)}
+    </div>
+  );
+}
+
 /** Settings sections that read and save through the API. Every other section is not available yet in live mode. */
-const LIVE_SECTIONS = ['accounts', 'rates', 'approvals'];
+const LIVE_SECTIONS = ['accounts', 'rates', 'approvals', 'calendars'];
 const NOT_YET: Record<string, string> = {
   profile: 'Your studio name, office, invoice numbering and payment terms.',
   permissions: 'The permission sets and what each one may do.',
@@ -216,6 +311,7 @@ export function SettingsScreen() {
         {section === 'accounts' && <AccountsSettings />}
         {section === 'rates' && <RatesSettings />}
         {section === 'approvals' && <ApprovalsSettings />}
+        {isLive && section === 'calendars' && <CalendarsSettings />}
         {isLive && !LIVE_SECTIONS.includes(section) && (
           <div className="solid-panel settings__panel"><h2 className="t-h2">{known.label}</h2><NotAvailable detail={NOT_YET[section] ?? 'This section of your studio settings.'} /></div>
         )}

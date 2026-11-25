@@ -63,6 +63,17 @@ test('sidebar is 232 px, collapses to 64 px under 1280 and hides under 768', asy
   await expect(page.getByText('Best on a larger screen')).toBeVisible();
 });
 
+test('the whole Firm nav and its foot fit a 1440 x 900 window without scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/firm/overview');
+  await page.evaluate(() => document.fonts.ready);
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await expect(nav.getByRole('link', { name: 'Calendar' })).toBeVisible();
+  expect(await nav.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
+  const signOut = (await nav.getByRole('button', { name: 'Sign out' }).boundingBox())!;
+  expect(signOut.y + signOut.height).toBeLessThanOrEqual(900);
+});
+
 test('no horizontal page scroll on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/me/home?as=P04');

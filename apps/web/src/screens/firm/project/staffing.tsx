@@ -17,6 +17,11 @@ import { Skeleton } from '../../../ui/Skeleton';
 import { useToast } from '../../../ui/Toast';
 import { PLANNER_HINT, usePlanner } from '../../shared/use-planner';
 import { GoTo } from '../../shared/go-to';
+import { PeriodNav } from '../../../ui/PeriodNav';
+import { Segmented } from '../../../ui/Segmented';
+import { addDays, dayMonthYear } from '../../../api/live/planning';
+import { useWorkload, usePlanningOptions } from '../workload-data';
+import { LivePlanner } from '../workload-planner';
 
 export function ProjectStaffingScreen() {
   const { id = '' } = useParams();
@@ -24,15 +29,50 @@ export function ProjectStaffingScreen() {
     return (
       <>
         <ProjectTeamPanel code={id} />
-        <h2 className="t-h2">Staffing plan</h2>
-        <div className="solid-panel"><NotAvailable detail="Weekly hours booked for each person on this project, against their capacity." /></div>
+        <LiveStaffingPlan code={id} />
       </>
     );
   }
   return <MockStaffingPlanner id={id} />;
 }
 
-/** The mock build's staffing planner. Live mode has no allocations API yet, so it never renders there. */
+export const STAFFING_DETAIL = 'Weekly hours booked for each person on this project, against their capacity.';
+
+/**
+ * Live mode: the workload planner filtered to this project (GET /workload?project=CODE), grouped by phase or person.
+ * Its failures stay inside this section, so the Team panel above keeps working.
+ */
+function LiveStaffingPlan({ code }: { code: string }) {
+  const [from, setFrom] = useState<string | undefined>();
+  const [groupBy, setGroupBy] = useState<'phase' | 'person'>('phase');
+  const { data, state, message, reload } = useWorkload({ from, project: code, projectTab: true });
+  const { projects, people } = usePlanningOptions();
+  const range = data ? `${dayMonthYear(data.from)} to ${dayMonthYear(data.to)}` : '';
+  return (
+    <section className="stack-4" aria-labelledby="staffing-plan-title">
+      <h2 id="staffing-plan-title" className="t-h2">Staffing plan</h2>
+      {state === 'missing'
+        ? <div className="solid-panel"><NotAvailable detail={STAFFING_DETAIL} /></div>
+        : state === 'denied' || state === 'error'
+          ? <ListStateBlock state={state} label="Staffing" errorMessage={message} onRetry={reload} capability="view project staffing (capacity.manage)" />
+          : !data
+            ? <Skeleton kind="planner" />
+            : (
+              <LivePlanner
+                data={data} reload={reload} projects={projects} people={people} projectCode={code} groupBy={groupBy} label={`${code} staffing`}
+                tools={(
+                  <>
+                    <PeriodNav range={range} onPrev={() => setFrom(addDays(data.from, -7))} onNext={() => setFrom(addDays(data.from, 7))} onToday={() => setFrom(undefined)} />
+                    <Segmented label="Group by" value={groupBy} onChange={setGroupBy} options={[{ value: 'phase', label: 'By phase' }, { value: 'person', label: 'By person' }]} />
+                  </>
+                )}
+              />
+            )}
+    </section>
+  );
+}
+
+/** The mock build's staffing planner. Live mode uses LiveStaffingPlan instead. */
 function MockStaffingPlanner({ id }: { id: string }) {
   const planner = usePlanner(id);
   if (planner.state === 'loading') return <Skeleton kind="planner" />;

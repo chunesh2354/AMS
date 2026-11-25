@@ -20,6 +20,7 @@ import { ProjectTimeScreen } from './screens/firm/project/time';
 import { PipelineScreen } from './screens/firm/pipeline';
 import { ProposalScreen } from './screens/firm/proposal';
 import { BillingScreen } from './screens/firm/billing';
+import { CalendarScreen } from './screens/firm/calendar';
 import { ProjectBillingScreen } from './screens/firm/project/billing';
 import { ReceivablesScreen } from './screens/firm/receivables';
 import { ReportsScreen } from './screens/firm/reports';
@@ -71,6 +72,7 @@ export const routes: RouteObject[] = [
         { path: 'people', element: <PeopleScreen /> },
         { path: 'people/:id', element: <PersonScreen /> },
         { path: 'workload', element: <WorkloadScreen /> },
+        { path: 'calendar', element: <CalendarScreen /> },
         { path: 'pipeline', element: <PipelineScreen /> },
         { path: 'proposals/:id', element: <ProposalScreen /> },
         { path: 'projects', element: <ProjectsScreen /> },

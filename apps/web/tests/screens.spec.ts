@@ -17,6 +17,7 @@ const SHOTS: Shot[] = [
   { name: 'firm-people', path: '/firm/people' },
   { name: 'firm-person-capacity', path: '/firm/people/P05?tab=capacity' },
   { name: 'firm-workload', path: '/firm/workload' },
+  { name: 'firm-calendar', path: '/firm/calendar' },
   { name: 'firm-pipeline', path: '/firm/pipeline' },
   { name: 'firm-proposal', path: '/firm/proposals/PROP-01' },
   { name: 'firm-projects', path: '/firm/projects' },

@@ -10,7 +10,7 @@ import { Skeleton } from '../../ui/Skeleton';
 import { useMediaQuery } from '../../ui/useMediaQuery';
 import { GoTo } from '../shared/go-to';
 import { isLive } from '../../api/live';
-import { NotAvailablePage } from '../../ui/NotAvailable';
+import { LiveMyScheduleScreen } from './schedule-live';
 
 const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -51,7 +51,7 @@ function MockMyScheduleScreen() {
   );
 }
 
-/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+/** Live mode reads the published plan from GET /me/schedule (see schedule-live.tsx); mock mode is the sample studio, unchanged. */
 export function MyScheduleScreen() {
-  return isLive ? <NotAvailablePage title="My schedule" detail="The projects you are booked on, week by week." /> : <MockMyScheduleScreen />;
+  return isLive ? <LiveMyScheduleScreen /> : <MockMyScheduleScreen />;
 }

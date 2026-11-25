@@ -1,0 +1,14 @@
+/* PlannerGrid cards as approved: confirmed 1px outline on the muted surface, tentative dashed, conflict 2px redline. */
+/* 2 + 18 + 18 = 38 px of text in the 40 px card, so the label is never clipped; each note or reason line adds 16 px (cardHeight). */
+.plan .pcard { justify-content: flex-start; padding: 2px var(--s-2); }
+.plan .pcard--confirmed { background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--ink-1); }
+.plan .pcard--tentative { background: var(--surface); outline: 1px dashed var(--ink-1); outline-offset: -1px; box-shadow: none; }
+.plan .pcard--conflict { outline: 0; box-shadow: inset 0 0 0 2px var(--redline); }
+.plan .pcard--tentative.pcard--conflict { outline: 1px dashed var(--redline); outline-offset: -1px; box-shadow: inset 0 0 0 2px var(--redline); }
+.plan .pcard--fixed { cursor: pointer; }
+.pcard__code { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard__note { font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard__why { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--redline); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Legend swatches sit outside .plan: they draw the same outlines as the cards. */
+.plan-legend__sw.pcard--confirmed { box-shadow: inset 0 0 0 1px var(--ink-1); }
+.plan-legend__sw.pcard--conflict { box-shadow: inset 0 0 0 2px var(--redline); background: var(--surface); }

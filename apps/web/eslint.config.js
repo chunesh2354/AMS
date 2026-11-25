@@ -6,7 +6,8 @@ import globals from 'globals';
 const COLOUR = '/#[0-9a-fA-F]{3,8}\\b|\\brgba?\\(|\\bhsla?\\(/';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-live', 'storybook-static', 'test-results', 'playwright-report'] },
+  // build:live keeps the previous live build as dist-live.prev (and writes dist-live.next first): build output, never linted.
+  { ignores: ['dist', 'dist-live', 'dist-live.prev', 'dist-live.next', 'storybook-static', 'test-results', 'playwright-report'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

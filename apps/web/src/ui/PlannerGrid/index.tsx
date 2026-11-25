@@ -4,12 +4,22 @@ import { Avatar } from '../Avatar';
 import { StatusChip } from '../StatusChip';
 import type { Status } from '../status-colors';
 import { cx } from '../cx';
+import './PlannerGrid.css';
 
 export type PlannerColumn = { key: string; label: string; note?: string; today?: boolean };
 export type PlannerRow = { id: string; label: string; sublabel?: string; avatar?: boolean; group?: string; groupStatus?: Status; pinned?: boolean };
 export type PlannerAllocation = {
   id: string; rowId: string; column: number; hours: number; label: string;
   kind: 'confirmed' | 'tentative' | 'hold'; published?: boolean;
+  /** Short line above the label, such as the project code. */
+  code?: string;
+  /** A second line, such as "New, not yet published". */
+  note?: string;
+  /** Drawn with a redline outline; `reason` says why it goes ahead (or that it has no reason yet). */
+  conflict?: boolean;
+  reason?: string;
+  /** This card cannot be dragged or resized, even when the grid can. */
+  locked?: boolean;
 };
 export type PlannerMark = { rowId: string; column: number; label: string };
 
@@ -43,6 +53,8 @@ const GROUP = 32;
 const MARKER = 16;
 const HEADER = 36;
 const PX_PER_HOUR = 8;
+const LINE = 16;
+const cardHeight = (a: PlannerAllocation) => CARD + (a.note ? LINE : 0) + (a.reason ? LINE : 0);
 
 type Item = { type: 'group'; name: string; status?: Status; top: number; height: number } | { type: 'row'; row: PlannerRow; index: number; top: number; height: number };
 
@@ -75,9 +87,11 @@ export function PlannerGrid({
   const heightOf = (rowId: string) => {
     let tallest = 48;
     columns.forEach((_, c) => {
-      const n = byCell.get(`${rowId}|${c}`)?.length ?? 0;
+      const cards = byCell.get(`${rowId}|${c}`) ?? [];
+      const n = cards.length;
       const marker = markerAt.has(`${rowId}|${c}`) ? MARKER + (n ? GAP : 0) : 0;
-      tallest = Math.max(tallest, GAP * 2 + n * CARD + Math.max(0, n - 1) * GAP + marker);
+      const off = offAt.has(`${rowId}|${c}`) ? LINE + GAP : 0;
+      tallest = Math.max(tallest, GAP * 2 + cards.reduce((s, a) => s + cardHeight(a), 0) + Math.max(0, n - 1) * GAP + marker + off);
     });
     return tallest;
   };
@@ -98,7 +112,7 @@ export function PlannerGrid({
     });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [body, pinned.length, byCell, markerAt, columns]);
+  }, [body, pinned.length, byCell, markerAt, offAt, columns]);
   const total = items.length ? items[items.length - 1].top + items[items.length - 1].height : 0;
 
   useLayoutEffect(() => {
@@ -147,7 +161,7 @@ export function PlannerGrid({
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const { r, c } = active;
     const card = firstCard(r, c);
-    if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && card && !readOnly) {
+    if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && card && !readOnly && !card.locked) {
       e.preventDefault();
       const nc = c + (e.key === 'ArrowLeft' ? -1 : 1);
       if (nc >= 0 && nc < columns.length) { onMove?.(card.id, card.rowId, nc); go(r, nc); }
@@ -161,10 +175,10 @@ export function PlannerGrid({
       case 'Home': e.preventDefault(); go(r, 0); break;
       case 'End': e.preventDefault(); go(r, columns.length - 1); break;
       case '+': case '=':
-        if (card && !readOnly) { e.preventDefault(); onResize?.(card.id, card.hours + 1); }
+        if (card && !readOnly && !card.locked) { e.preventDefault(); onResize?.(card.id, card.hours + 1); }
         break;
       case '-':
-        if (card && !readOnly && card.hours > 1) { e.preventDefault(); onResize?.(card.id, card.hours - 1); }
+        if (card && !readOnly && !card.locked && card.hours > 1) { e.preventDefault(); onResize?.(card.id, card.hours - 1); }
         break;
       case 'Enter': case ' ':
         e.preventDefault();
@@ -239,22 +253,28 @@ export function PlannerGrid({
             {offLabel && <span className="plan__off">{offLabel}</span>}
             {cards.map((a) => {
               const hours = resize?.id === a.id ? resize.hours : a.hours;
+              const fixed = readOnly || a.locked;
               return (
                 <button
-                  key={a.id} type="button" tabIndex={-1} draggable={!readOnly && grip !== a.id}
-                  className={cx('pcard', `pcard--${a.kind}`, dragging === a.id && 'pcard--dragging')}
+                  key={a.id} type="button" tabIndex={-1} draggable={!fixed && grip !== a.id}
+                  className={cx('pcard', `pcard--${a.kind}`, a.conflict && 'pcard--conflict', fixed && 'pcard--fixed', dragging === a.id && 'pcard--dragging')}
+                  style={a.note || a.reason ? { height: cardHeight(a) } : undefined}
                   onClick={(e) => { e.stopPropagation(); setActive({ r, c }); if (afterResize.current) { afterResize.current = false; return; } onCardClick?.(a); }}
                   onDragStart={(e) => { e.dataTransfer.setData('text/plain', a.id); e.dataTransfer.effectAllowed = 'move'; setDragging(a.id); }}
                   onDragEnd={() => { setDragging(null); setDropAt(null); }}
                 >
                   <span className="pcard__top">
-                    <span className="t-numeric">{hours} h</span>
+                    {a.code ? <span className="pcard__code">{a.code}</span> : <span className="t-numeric">{hours} h</span>}
+                    {a.code && <span className="t-numeric">{hours} h</span>}
                     {a.published && <span className="pcard__pub"><CircleCheck size={14} strokeWidth={1.5} aria-hidden /><span className="sr-only">Published</span></span>}
                     {a.kind === 'tentative' && <span className="sr-only">Tentative</span>}
                     {a.kind === 'hold' && <span className="sr-only">On hold, retained</span>}
                   </span>
                   <span className="pcard__what">{a.label}</span>
-                  {!readOnly && (
+                  {a.note && <span className="pcard__note">{a.note}</span>}
+                  {a.conflict && <span className="sr-only">Conflict</span>}
+                  {a.reason && <span className="pcard__why">{a.reason}</span>}
+                  {!fixed && (
                     <span
                       className="pcard__grip" aria-hidden
                       onPointerDown={(e) => startResize(e, a)}

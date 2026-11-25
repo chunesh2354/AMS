@@ -61,9 +61,14 @@ test('1. staff login, my time, edit persists, submit locks', async ({ page }) =>
 test('6. an unconnected route says it is not available yet, never sample data; sign out requires login', async ({ page }) => {
   await login(page, 'p10');
   await expect(page).toHaveURL(/\/firm\/overview/);
-  // Workload has no API yet. Live mode shows an honest empty state instead of the sample studio (no banner, no sample rows).
+  // Workload is live now (planning API, migration 011): the heatmap, from the database.
   await page.goto('/firm/workload');
   await expect(page.getByRole('heading', { name: 'Workload' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Booked hours by person and week' })).toBeVisible();
+  await expect(page.getByText('Not available yet')).toHaveCount(0);
+  // Pipeline has no API yet. Live mode shows an honest empty state instead of the sample studio (no banner, no sample rows).
+  await page.goto('/firm/pipeline');
+  await expect(page.getByRole('heading', { name: 'Pipeline' })).toBeVisible();
   await expect(page.getByRole('status').getByText('Not available yet')).toBeVisible();
   await expect(page.getByText('Sample data. This screen is not connected to the database yet.')).toHaveCount(0);
   await expect(page.getByRole('table')).toHaveCount(0);

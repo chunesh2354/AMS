@@ -9,7 +9,7 @@ export const FIRM_LISTS = [
 export const TEAM_LISTS = ['/me/home?as=P04', '/me/work?as=P04', '/me/schedule?as=P04', '/me/time?as=P04', '/me/expenses?as=P04', '/me/leave?as=P04', '/me/profile?as=P04'];
 export const READY = [
   ...FIRM_LISTS,
-  '/firm/overview?as=P02', '/firm/people/P05?tab=overview', '/firm/people/P05?tab=access', '/firm/people/P05?tab=projects', '/firm/people/P05?tab=capacity', '/firm/people/P05?tab=leave',
+  '/firm/overview?as=P02', '/firm/calendar', '/firm/people/P05?tab=overview', '/firm/people/P05?tab=access', '/firm/people/P05?tab=projects', '/firm/people/P05?tab=capacity', '/firm/people/P05?tab=leave',
   '/firm/people/P05?tab=rates', '/firm/people/P05?tab=rates&as=P02', '/firm/people/P05?tab=activity',
   '/firm/projects/PRJ-01?as=P02', '/firm/projects/PRJ-03', '/firm/projects/PRJ-01/tasks?view=list', '/firm/projects/PRJ-02/billing?as=P02', '/firm/billing?as=P02', '/firm/receivables?as=P02',
   '/firm/pipeline?view=list', '/firm/proposals/PROP-02', '/firm/proposals/OPP-02',

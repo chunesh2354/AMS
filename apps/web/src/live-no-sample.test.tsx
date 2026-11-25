@@ -82,7 +82,7 @@ const ROUTES = [
   '/firm/overview', '/firm/projects', '/firm/projects/PRJ-01', '/firm/projects/PRJ-01/phases', '/firm/projects/PRJ-01/staffing',
   '/firm/projects/PRJ-01/time', '/firm/projects/PRJ-01/costs', '/firm/projects/PRJ-01/billing', '/firm/projects/PRJ-01/changes',
   '/firm/projects/PRJ-01/files', '/firm/projects/PRJ-01/activity',
-  '/firm/people', '/firm/people/P02', '/firm/workload', '/firm/pipeline', '/firm/pipeline?view=list', '/firm/proposals/PROP-01',
+  '/firm/people', '/firm/people/P02', '/firm/workload', '/firm/calendar', '/firm/pipeline', '/firm/pipeline?view=list', '/firm/proposals/PROP-01',
   '/firm/approvals', '/firm/billing', '/firm/receivables', '/firm/reports/utilization', '/firm/reports/contribution',
   ...['profile', 'accounts', 'rates', 'permissions', 'calendars', 'work-categories', 'templates', 'approval-policies', 'integrations', 'imports'].map((k) => `/firm/settings/${k}`),
   '/me/schedule', '/me/time', '/me/expenses', '/me/leave', '/me/profile',

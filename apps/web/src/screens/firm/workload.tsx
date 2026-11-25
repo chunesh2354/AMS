@@ -10,7 +10,7 @@ import { Skeleton } from '../../ui/Skeleton';
 import { PLANNER_HINT, usePlanner } from '../shared/use-planner';
 import { GoTo } from '../shared/go-to';
 import { isLive } from '../../api/live';
-import { NotAvailablePage } from '../../ui/NotAvailable';
+import { LiveWorkloadScreen } from './workload-live';
 
 function MockWorkloadScreen() {
   const planner = usePlanner();
@@ -34,7 +34,7 @@ function MockWorkloadScreen() {
   );
 }
 
-/** Live mode has no API for this yet: the honest empty state, never the sample studio. */
+/** Live mode reads GET /workload (heatmap and planner); a server without the planning API shows "Not available yet". */
 export function WorkloadScreen() {
-  return isLive ? <NotAvailablePage title="Workload" detail="Who is booked on which project, week by week, against their capacity." /> : <MockWorkloadScreen />;
+  return isLive ? <LiveWorkloadScreen /> : <MockWorkloadScreen />;
 }

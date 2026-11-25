@@ -1,5 +1,5 @@
 import {
-  CalendarDays, CalendarRange, ChartColumn, Clock, Ellipsis, FolderKanban, House, IndianRupee, Inbox, Kanban,
+  Calendar, CalendarDays, CalendarRange, ChartColumn, Clock, Ellipsis, FolderKanban, House, IndianRupee, Inbox, Kanban,
   LayoutDashboard, Receipt, SlidersHorizontal, SquareCheckBig, Sun, Users,
 } from 'lucide-react';
 import type { NavSection } from '../ui/SideNav';
@@ -21,6 +21,7 @@ export const firmNav = (approvalsBadge?: number): NavSection[] => [
   { label: 'People', items: [
     { to: '/firm/people', label: 'People', icon: <Users {...i} /> },
     { to: '/firm/workload', label: 'Workload', icon: <CalendarRange {...i} /> },
+    { to: '/firm/calendar', label: 'Calendar', icon: <Calendar {...i} /> },
   ] },
   { label: 'Commercial', items: [
     { to: '/firm/pipeline', label: 'Pipeline', icon: <Kanban {...i} /> },

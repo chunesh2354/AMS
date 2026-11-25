@@ -230,7 +230,7 @@ function routesToCrawl(code: string, personRef: string) {
   const settings = ['profile', 'permissions', 'accounts', 'rates', 'calendars', 'work-categories', 'templates', 'approvals', 'approval-policies', 'integrations', 'imports'];
   const reports = ['utilization', 'contribution', 'budget-vs-actual', 'fee-entitlement', 'work-in-progress', 'receivables-ageing', 'timesheet-compliance'];
   return [
-    '/firm/overview', '/firm/people', `/firm/people/${personRef}`, '/firm/workload', '/firm/pipeline', '/firm/proposals/PROP-01', '/firm/projects',
+    '/firm/overview', '/firm/people', `/firm/people/${personRef}`, `/firm/people/${personRef}?tab=capacity`, '/firm/workload', '/firm/workload?view=planner', '/firm/calendar', '/firm/pipeline', '/firm/proposals/PROP-01', '/firm/projects',
     ...projectTabs.map((t) => `/firm/projects/${code}${t}`),
     // The sample's own codes: a lookup into the sample studio by code would show its names.
     '/firm/projects/PRJ-01', '/firm/people/P02',

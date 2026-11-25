@@ -9,7 +9,17 @@ import { useResource } from '../../api/useResource';
 import { isLive } from '../../api/live';
 import { ACCOUNT_TYPES, accountTypeLabel } from '../../api/live/accounts';
 import { getProfile, type PersonProfile, type ProfileWeek } from '../../api/live/people';
-import { can, canSeeRates, useSession } from '../../app/session';
+import { can, canSeeRates, useSession, type Viewer } from '../../app/session';
+import { failureMessage, hoursOf } from '../../api/live';
+import { addDays, barOf, getCapacity, putCapacity } from '../../api/live/calendar';
+import { DateField } from '../../ui/DateField';
+import { Form, FormSection } from '../../ui/Form';
+import { InlineAlert } from '../../ui/InlineAlert';
+import { NumberField } from '../../ui/NumberField';
+import { Sheet } from '../../ui/Sheet';
+import { TextField } from '../../ui/TextField';
+import { useToast } from '../../ui/Toast';
+import { formatDate, formatHours } from '../../ui/format';
 import { WorkspaceColumns } from '../../layouts/WorkspaceColumns';
 import { ActivityFeed, type ActivityDay } from '../../ui/ActivityFeed';
 import { Avatar } from '../../ui/Avatar';
@@ -17,7 +27,7 @@ import { availableHours, AvailabilityBar, AvailabilityLegend } from '../../ui/Av
 import { AttentionList } from '../../ui/AttentionList';
 import { ConflictBanner } from '../../ui/ConflictBanner';
 import { DataTable, RESTRICTED, type Column } from '../../ui/DataTable';
-import { EffectiveDatedList } from '../../ui/EffectiveDatedList';
+import { EffectiveDatedList, type EffectiveVersion } from '../../ui/EffectiveDatedList';
 import { EmptyState } from '../../ui/EmptyState';
 import { KpiTile } from '../../ui/KpiTile';
 import { ListStateBlock } from '../../ui/ListState';
@@ -236,10 +246,10 @@ function AccessTab({ roles }: { roles: string[] }) {
 // ---------- Live mode ----------
 
 /**
- * Capacity, Leave and Activity have no endpoint yet (no working schedule or leave tables in the core path), so
- * live mode leaves those tabs out rather than showing sample data. Rates appear only for those who may read them.
+ * Leave and Activity have no endpoint yet, so live mode leaves those tabs out rather than showing sample data.
+ * Capacity (GET /people/:id/capacity) shows to those the server lets read it; Rates only to those who may read them.
  */
-const LIVE_TABS = ['overview', 'access', 'projects', 'rates'] as const;
+const LIVE_TABS = ['overview', 'access', 'projects', 'capacity', 'rates'] as const;
 type LiveTab = (typeof LIVE_TABS)[number];
 const ACCOUNTS_PATH = '/firm/settings/accounts';
 const fenced = <T,>(f: { restricted: true } | { restricted: false; value: T }) => (f.restricted ? RESTRICTED : f.value);
@@ -251,7 +261,7 @@ function LivePersonScreen() {
   const { viewer } = useSession();
   const { state, data: person, retry } = useResource(() => getProfile(id), [id]);
 
-  const tabs = LIVE_TABS.filter((t) => t !== 'rates' || canSeeRates(viewer));
+  const tabs = LIVE_TABS.filter((t) => (t === 'rates' ? canSeeRates(viewer) : t === 'capacity' ? !!person && seesCapacity(viewer, person) : true));
   const requested = params.get('tab') as LiveTab | null;
   const tab: LiveTab = requested && tabs.includes(requested) ? requested : 'overview';
   const crumb = [{ label: 'People', to: '/firm/people' }, { label: person?.name ?? id }];
@@ -293,6 +303,7 @@ function LivePersonScreen() {
       {tab === 'overview' && <LiveOverview person={person} />}
       {tab === 'access' && <LiveAccess person={person} />}
       {tab === 'projects' && <LiveProjects person={person} />}
+      {tab === 'capacity' && <LiveCapacity person={person} />}
       {tab === 'rates' && <LiveRates person={person} />}
     </>
   );
@@ -379,4 +390,109 @@ function LiveRates({ person }: { person: PersonProfile }) {
     { key: 'from', header: 'Effective from', type: 'date', value: (r) => r.from },
   ];
   return <DataTable label="Rates" columns={columns} rows={rows} rowKey={(r) => r.id} />;
+}
+
+/** Capacity is workload data: firm-wide and view-level capacity.manage read everyone's, own reads only one's own (as the server does). */
+export function seesCapacity(viewer: Viewer, person: { id: string; ref: string }) {
+  const level = viewer.capabilities?.['capacity.manage'];
+  if (level === 'firm' || level === 'view') return true;
+  return !!level && (person.ref === viewer.id || (!!viewer.personId && person.id === viewer.personId));
+}
+
+function LiveCapacity({ person }: { person: PersonProfile }) {
+  const { state, data, retry } = useResource(() => getCapacity(person.ref, 8), [person.ref]);
+  const [editing, setEditing] = useState(false);
+  if (state !== 'ready' || !data) return <ListStateBlock state={state === 'ready' ? 'loading' : state} label="Capacity" onRetry={retry} capability="view capacity" />;
+  const conflict = data.weeks.find((w) => w.conflict);
+  const versions = data.versions;
+  const current = versions.reduce((at, v, i) => (v.effective_from <= data.today ? i : at), -1);
+  const timeline: EffectiveVersion[] = versions.map((v, i) => ({
+    from: v.effective_from,
+    to: versions[i + 1] ? addDays(versions[i + 1].effective_from, -1) : null,
+    label: `${formatHours(hoursOf(v.weekly_hours) ?? 0)} a week`,
+    detail: [v.note, v.created_by ? `Set by ${v.created_by}` : null].filter(Boolean).join('. ') || undefined,
+  }));
+  return (
+    <>
+      {conflict && (
+        <ConflictBanner
+          kind="overallocated"
+          hoursOver={hoursOf(conflict.over_hours) ?? 0}
+          detail={`Week of ${formatDate(conflict.week_start)}: ${formatHours(hoursOf(conflict.available) ?? 0)} available, ${formatHours(hoursOf(conflict.confirmed_allocations) ?? 0)} confirmed.`}
+        />
+      )}
+      <WorkspaceColumns
+        main={(
+          <section className="card solid-panel" aria-labelledby="cap-weeks">
+            <div className="chip-row" style={{ justifyContent: 'space-between' }}><h2 id="cap-weeks" className="t-h2">Next 8 weeks</h2><AvailabilityLegend /></div>
+            <p className="t-caption ink-2">{data.view === 'draft' ? 'Includes bookings not published yet.' : 'Published bookings only.'} Pending leave is not taken off until it is approved.</p>
+            <div className="stack-rows">
+              {data.weeks.map((w) => <AvailabilityBar key={w.week_start} label={formatDate(w.week_start).slice(0, 6)} {...barOf(w)} />)}
+            </div>
+          </section>
+        )}
+        side={(
+          <section className="card solid-panel" aria-labelledby="cap-hours">
+            <h2 id="cap-hours" className="t-h2">Weekly hours</h2>
+            <p className="t-body-sm">
+              <span className="t-numeric">{formatHours(hoursOf(data.current.weekly_hours) ?? 0)}</span> a week now
+              {data.current.source === 'firm_default' ? ', the studio default.' : data.current.effective_from ? `, from ${formatDate(data.current.effective_from)}.` : '.'}
+            </p>
+            {timeline.length > 0
+              ? <EffectiveDatedList versions={timeline} current={current} />
+              : <p className="t-caption ink-2">No hours of their own yet. The studio default of {formatHours(hoursOf(data.firm_default_weekly_hours) ?? 0)} a week applies.</p>}
+            {data.can_manage && <span><Button onClick={() => setEditing(true)}>Change weekly hours</Button></span>}
+          </section>
+        )}
+      />
+      {data.can_manage && (
+        <WeeklyHoursSheet
+          open={editing} onClose={() => setEditing(false)} person={person} today={data.today} hours={data.current.weekly_hours}
+          onSaved={() => { setEditing(false); retry(); }}
+        />
+      )}
+    </>
+  );
+}
+
+type WeeklyHoursSheetProps = { open: boolean; onClose: () => void; person: PersonProfile; today: string; hours: string; onSaved: () => void };
+
+function WeeklyHoursSheet({ open, onClose, person, today, hours, onSaved }: WeeklyHoursSheetProps) {
+  const toast = useToast();
+  const [from, setFrom] = useState<string | null>(today);
+  const [value, setValue] = useState(String(hoursOf(hours) ?? ''));
+  const [note, setNote] = useState('');
+  const [tried, setTried] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const n = Number(value);
+  const badHours = value.trim() === '' || !Number.isFinite(n) || n < 0 || n > 168 || Math.round(n * 100) !== n * 100;
+  const save = async () => {
+    setTried(true); setError(null);
+    if (!from || badHours) return;
+    setSaving(true);
+    try {
+      await putCapacity(person.ref, { weekly_hours: n, effective_from: from, ...(note.trim() ? { note: note.trim() } : {}) });
+      toast({ variant: 'success', message: `${person.name} works ${formatHours(n)} a week from ${formatDate(from)}.` });
+      onSaved();
+    } catch (e) {
+      setError(failureMessage(e));
+    } finally { setSaving(false); }
+  };
+  return (
+    <Sheet
+      open={open} onClose={onClose} title="Change weekly hours"
+      description="The new hours apply from the effective date. Earlier weeks keep the hours they had."
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={saving} onClick={() => void save()}>Save hours</Button></>}
+    >
+      <Form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <FormSection>
+          <DateField label="Effective from" value={from} today={today} onChange={setFrom} error={tried && !from ? 'Choose a date' : undefined} />
+          <NumberField label="Hours per week" value={value} onChange={(e) => setValue(e.target.value)} error={tried && badHours ? 'Enter hours from 0 to 168, at most two decimals' : undefined} />
+          <TextField label="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+        </FormSection>
+        {error && <InlineAlert variant="danger" title={error} />}
+      </Form>
+    </Sheet>
+  );
 }
