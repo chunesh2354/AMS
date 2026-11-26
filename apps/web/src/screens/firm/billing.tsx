@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
-import { liveAccounting, liveDrafts, liveReady, liveWip, pmConfirm, reconcileDraft, rejectDraft, sendForReview, submitDraft, type LiveDraft } from '../../api/live/billing';
+import { canSubmitToAccounting, liveAccounting, liveDrafts, liveReady, liveWip, pmConfirm, reconcileDraft, rejectDraft, sendForReview, submitDraft, type LiveDraft } from '../../api/live/billing';
 import { Checkbox } from '../../ui/Checkbox';
 import { TextArea } from '../../ui/TextArea';
 import { useSearchParams } from 'react-router-dom';
@@ -64,7 +64,7 @@ function LiveDraftActions({ draft, onSubmit, onReject, onDone }: { draft: LiveDr
       {ap === 'Draft' && <Button variant="secondary" disabled={busy} onClick={() => run(() => sendForReview(uuid), `${draft.id} sent for review.`)}>Send for review</Button>}
       {(ap === 'Draft' || ap === 'In review') && !pmConfirmed && <Button variant="secondary" disabled={busy} onClick={() => run(() => pmConfirm(uuid), `${draft.id} confirmed by PM.`)}>PM confirm</Button>}
       {ap !== 'Approved' && ap !== 'Rejected' && <Button variant="ghost" disabled={busy} onClick={onReject}>Reject</Button>}
-      <Button variant="primary" disabled={busy || ap !== 'Approved' || (ac !== 'Not sent' && ac !== 'Failed')} onClick={onSubmit}>Submit to accounting</Button>
+      <Button variant="primary" disabled={busy || !canSubmitToAccounting(ap, ac)} onClick={onSubmit}>Submit to accounting</Button>
     </span>
   );
 }

@@ -41,11 +41,18 @@ export const mapException = (e: LiveExceptionRaw): NteException => ({
   eligible: cellMoney(e.eligible) as unknown as number, excess: cellMoney(e.excess) as unknown as number,
 });
 
+/** The server's accounting state before a draft is sent (packages/domain draftAccounting). Older names kept for safety. */
+const NOT_SENT = ['Not submitted', 'Not sent', 'Unsent'];
+
 /** Draft status shown in the list: accounting state wins once the draft has left approval. */
 export function draftStatus(d: Pick<LiveDraftRaw, 'approval_state' | 'accounting_state'>): Status {
-  if (d.accounting_state && d.accounting_state !== 'Not sent' && d.accounting_state !== 'Unsent') return asStatus(d.accounting_state === 'Pending' ? 'Pending (accounting)' : d.accounting_state);
+  if (d.accounting_state && !NOT_SENT.includes(d.accounting_state)) return asStatus(d.accounting_state === 'Pending' ? 'Pending (accounting)' : d.accounting_state);
   return asStatus(d.approval_state);
 }
+
+/** Submit to accounting is allowed for an approved draft that was never sent, or whose last send failed. */
+export const canSubmitToAccounting = (approvalState: string, accountingState: string) =>
+  approvalState === 'Approved' && (NOT_SENT.includes(accountingState) || accountingState === 'Failed');
 
 const basisText = (v: unknown) => (isRestricted(v) ? 'Restricted' : v == null ? 'Not set' : typeof v === 'object' && 'amount' in (v as object) ? (v as LiveMoney).amount : String(v));
 
