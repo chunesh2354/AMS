@@ -64,7 +64,7 @@ function LiveDraftActions({ draft, onSubmit, onReject, onDone }: { draft: LiveDr
       {ap === 'Draft' && <Button variant="secondary" disabled={busy} onClick={() => run(() => sendForReview(uuid), `${draft.id} sent for review.`)}>Send for review</Button>}
       {(ap === 'Draft' || ap === 'In review') && !pmConfirmed && <Button variant="secondary" disabled={busy} onClick={() => run(() => pmConfirm(uuid), `${draft.id} confirmed by PM.`)}>PM confirm</Button>}
       {ap !== 'Approved' && ap !== 'Rejected' && <Button variant="ghost" disabled={busy} onClick={onReject}>Reject</Button>}
-      <Button variant="primary" disabled={busy || ap !== 'Approved' || (ac !== 'Not sent' && ac !== 'Failed')} onClick={onSubmit}>Submit to accounting</Button>
+      <Button variant="primary" disabled={busy || ap !== 'Approved' || (ac !== 'Not sent' && ac !== 'Not submitted' && ac !== 'Failed')} onClick={onSubmit}>Submit to accounting</Button>
     </span>
   );
 }
@@ -205,7 +205,11 @@ export function BillingScreen() {
               <dt>Last success</dt><dd className="t-numeric">{acct.data.lastSuccess}</dd>
               <dt>Sent</dt><dd>{acct.data.sent}</dd>
             </dl>
-            <p className="t-caption ink-2">Nothing reaches a real ledger while this adapter is MOCK.</p>
+            <p className="t-caption ink-2">
+              {acct.data.mode === 'Not configured'
+                ? 'No accounting system is connected yet. Approve drafts here, then raise the invoice in your accounting software.'
+                : 'Nothing reaches a real ledger while this adapter is MOCK.'}
+            </p>
           </section>
         ))}
       {isLive ? <LiveGenerateDraftSheet open={generating} onClose={() => setGenerating(false)} items={ready.data ?? []} onCreated={(no) => { setSelected(no); refresh(); }} /> : <GenerateDraftSheet open={generating} onClose={() => setGenerating(false)} items={ready.data ?? []} excess={excess} people={people.data ?? []} />}
@@ -220,9 +224,11 @@ export function BillingScreen() {
       >
         {draft && acct.data && (
           <div className="stack-4">
-            <p className="toolbar"><StatusChip status={acct.data.mode} /><span className="t-body-sm"><span className="t-numeric">{draft.id}</span> goes to the {acct.data.adapter} and becomes a finalized invoice.</span></p>
+            <p className="toolbar"><StatusChip status={acct.data.mode} /><span className="t-body-sm">{acct.data.mode === 'Not configured'
+              ? <><span className="t-numeric">{draft.id}</span> is marked as sent. Nothing leaves Practice: raise the invoice in your accounting software, then record its number here.</>
+              : <><span className="t-numeric">{draft.id}</span> goes to the {acct.data.adapter} and becomes a finalized invoice.</>}</span></p>
             <dl className="calc"><dt>Draft total</dt><dd className="calc__strong">{formatINR(draft.amount)}</dd><dt>Client</dt><dd>{draft.client}</dd></dl>
-            <InlineAlert variant="warn" title="No real ledger entry is made">This stays true while the adapter is MOCK.</InlineAlert>
+            {acct.data.mode === 'MOCK' && <InlineAlert variant="warn" title="No real ledger entry is made">This stays true while the adapter is MOCK.</InlineAlert>}
             {isLive && acct.data.mode === 'MOCK' && <Checkbox label="Simulate a timeout (mock adapter only)" description="The mock adapter records the invoice, then does not answer, so the draft becomes Uncertain." checked={simulateTimeout} onChange={(e) => setSimulateTimeout(e.target.checked)} />}
           </div>
         )}

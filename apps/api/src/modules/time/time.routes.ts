@@ -123,7 +123,37 @@ async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any, leni
   )).rows[0];
 }
 
-const ENTRY_SELECT = `select te.*, ph.name as phase_name, pr.code as project_code, pr.name as project_name, ic.name as category_name, tk.title as task_title
+/**
+ * Removes Draft or Returned entries from a grid cell. A Returned entry is still linked to the approval request that
+ * returned it, so the link goes first (the request, its decision and the return reason stay), with an audit row naming
+ * the hours that were removed. Without this the delete hit the link's foreign key and failed with a 500.
+ */
+async function deleteEntries(tx: Tx, actor: Actor, firmId: string, entries: { id: string; approval_state: string; timesheet_id?: string; corrected_from_id?: string | null }[]) {
+  for (const e of entries) {
+    const linked = (await tx.query('delete from approval_request_entry where time_entry_id = $1 returning approval_request_id', [e.id])).rows;
+    const gone = (await tx.query('delete from time_entry where id = $1 returning duration_hours, service_date, corrected_from_id', [e.id])).rows[0];
+    // Withdrawing a returned correction restores the entry it corrected (Amended -> Approved), unless another live
+    // correction still replaces it: the approved hours come back instead of vanishing.
+    let restored: string | null = null;
+    if (gone?.corrected_from_id) {
+      const r = await tx.query(
+        `update time_entry o set approval_state = 'Approved', updated_by = $2, updated_at = now() where o.id = $1 and o.approval_state = 'Amended'
+           and not exists (select 1 from time_entry c where c.corrected_from_id = o.id and c.approval_state <> 'Amended') returning o.id`,
+        [gone.corrected_from_id, actor.id],
+      );
+      restored = r.rows[0]?.id ?? null;
+    }
+    if (linked.length && gone) {
+      await audit(tx, actor, firmId, {
+        recordType: 'time_entry', recordId: e.id, action: 'remove_returned',
+        previous: { approval_state: e.approval_state, duration_hours: gone.duration_hours, service_date: gone.service_date, approval_request_ids: linked.map((l) => l.approval_request_id) },
+        next: restored ? { restored_entry_id: restored } : undefined,
+      });
+    }
+  }
+}
+
+const ENTRY_SELECT =`select te.*, ph.name as phase_name, pr.code as project_code, pr.name as project_name, ic.name as category_name, tk.title as task_title
   from time_entry te left join phase ph on ph.id = te.phase_id left join project pr on pr.id = te.project_id left join internal_work_category ic on ic.id = te.internal_category_id
   left join task tk on tk.id = te.task_id`;
 
@@ -185,19 +215,26 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const ref = body.phase_id ?? body.internal_category_id ?? body.entry_id;
     if (!ref) throw new ApiError(400, 'VALIDATION', 'Say which line this cell belongs to.', [{ field: 'phase_id', code: 'required' }]);
     const existing = (await tx.query(
-      `select id, approval_state, timesheet_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`,
+      `select id, approval_state, timesheet_id, corrected_from_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`,
       body.phase_id ? [actor.id, date, ref, taskId] : [actor.id, date, ref],
     )).rows;
     if (existing.some((e) => !['Draft', 'Returned'].includes(e.approval_state))) throw conflict('LOCKED', 'Submitted or approved hours cannot be edited. Request a correction instead.');
+    // A returned correction holds a difference against approved (maybe billed) hours, not the cell's hours, so typing
+    // a value here would store it as the difference. It can be withdrawn (set to 0) and requested again instead.
+    if (value > 0 && existing.some((e) => e.corrected_from_id)) {
+      throw conflict('RETURNED_CORRECTION', 'These hours are a returned correction. Set the cell to 0 to withdraw it, then use Request correction again.');
+    }
     await assertDayRoom(tx, actor.id, date, value, existing.map((e) => e.id));
     if (existing.length && value > 0) {
       await tx.query(`update time_entry set duration_hours = $2, updated_by = $3, updated_at = now() where id = $1`, [existing[0].id, value, actor.id]);
-      for (const e of existing.slice(1)) await tx.query('delete from time_entry where id = $1', [e.id]);
+      await deleteEntries(tx, actor, firmId, existing.slice(1));
     } else if (existing.length) {
-      for (const e of existing) await tx.query('delete from time_entry where id = $1', [e.id]);
+      await deleteEntries(tx, actor, firmId, existing);
     } else if (value > 0) {
       await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: value, phase_id: body.phase_id, internal_category_id: body.internal_category_id, task_id: taskId });
     }
+    // Removing returned hours can change the week's status (Returned -> Open), so the timesheet is recomputed.
+    if (existing.some((e) => e.approval_state === 'Returned')) await refreshTimesheet(tx, existing[0].timesheet_id);
     return { ok: true };
   });
 
@@ -284,20 +321,47 @@ export function timeRoutes({ get, post, put, del }: Api) {
   });
 
   // R14: history survives. A billed original keeps its link; the delta goes to the next draft.
+  // The hours given are the corrected TOTAL for the work, measured against the whole correction chain (the original and
+  // every correction of it): billed entries keep counting even once Amended, so the new entry is total - what still counts.
+  // Correcting a correction therefore never bills hours twice (6 h billed, corrected to 4, then to 3, nets 3, not 9).
   post('/time-entries/:id/correct', async ({ tx, actor, firmId, params, body }) => {
     required(body, ['duration_hours', 'reason']);
     const id = uuidParam(params.id, 'Time entry');
     const e = (await tx.query(
-      `select te.*, p.pm_id, p.principal_id from time_entry te left join project p on p.id = te.project_id where te.id = $1`, [id],
+      `select te.*, p.pm_id, p.principal_id from time_entry te left join project p on p.id = te.project_id where te.id = $1 for update of te`, [id],
     )).rows[0];
     if (!e || e.person_id !== actor.id) throw notFound('Time entry');
     try { transition('timeApproval', e.approval_state, 'amend'); } catch (err) { rethrowTransition(err); }
     if (e.billing_state === 'Reserved') throw conflict('RESERVED_IN_DRAFT', 'This entry is in a live billing draft. Reject the draft before correcting it.');
     const next = Number(body.duration_hours);
-    const billed = e.billing_state === 'Billed';
-    const newDuration = billed ? Number((next - Number(e.duration_hours)).toFixed(2)) : next;
-    if (newDuration === 0) throw ruleError('F10', 'The corrected hours are the same as the original.');
-    if (!billed && !(next > 0)) throw ruleError('F10', 'Corrected hours must be above zero.');
+    if (!Number.isFinite(next) || next < 0) throw new ApiError(400, 'VALIDATION', 'Corrected hours must be zero or more.', [{ field: 'duration_hours', code: 'range' }]);
+    const chainIds = (await tx.query(
+      `with recursive up as (
+         select id, corrected_from_id from time_entry where id = $1
+         union select t.id, t.corrected_from_id from time_entry t join up on t.id = up.corrected_from_id
+       ), down as (
+         select t.* from time_entry t where t.id = (select id from up where corrected_from_id is null)
+         union select t.* from time_entry t join down on t.corrected_from_id = down.id
+       ) select id from down where person_id = $2`, [id, actor.id],
+    )).rows.map((r) => r.id as string);
+    const chain = (await tx.query('select id, duration_hours, approval_state, billing_state from time_entry where id = any($1::uuid[]) for update', [chainIds])).rows;
+    if (chain.some((c) => c.billing_state === 'Reserved')) throw conflict('RESERVED_IN_DRAFT', 'Part of this work is in a live billing draft. Reject the draft before correcting it.');
+    const counts = (c: { approval_state: string; billing_state: string }) => c.approval_state !== 'Amended' || c.billing_state === 'Billed';
+    const anyBilled = chain.some((c) => c.billing_state === 'Billed');
+    // What still counts once this entry is Amended: billed entries keep counting, an unbilled one stops.
+    const after = chain.reduce((s, c) => s + (counts(c) && !(c.id === id && c.billing_state !== 'Billed') ? Number(c.duration_hours) : 0), 0);
+    if (!anyBilled && !(next > 0)) throw ruleError('F10', 'Corrected hours must be above zero.');
+    const current = chain.reduce((s, c) => s + (counts(c) ? Number(c.duration_hours) : 0), 0);
+    const newDuration = Number((next - after).toFixed(2));
+    if (Math.abs(next - current) < 0.005) throw ruleError('F10', 'The corrected hours are the same as the hours already recorded.');
+    if (newDuration === 0) {
+      // The total asked for is what the rest of the chain already holds (undoing an unbilled correction): retire this
+      // entry and insert nothing (a line is never 0 h).
+      await tx.query(`update time_entry set approval_state = 'Amended', updated_by = $2, updated_at = now() where id = $1`, [id, actor.id]);
+      await refreshTimesheet(tx, e.timesheet_id);
+      const undoneAudit = await audit(tx, actor, firmId, { recordType: 'time_entry', recordId: id, action: 'correct', previous: { duration_hours: e.duration_hours }, next: { new_entry_id: null, total_hours: hours(next) }, reason: body.reason });
+      return { id: null, duration_hours: hours(0), approval_request_id: null, audit_event_id: undoneAudit };
+    }
     await tx.query(`update time_entry set approval_state = 'Amended', updated_by = $2, updated_at = now() where id = $1`, [id, actor.id]);
     const row = (await tx.query(
       `insert into time_entry (firm_id, person_id, service_date, project_id, phase_id, internal_category_id, fee_component_id, duration_hours, note, timesheet_id, approval_state, billing_state, corrected_from_id, correction_reason, created_by, task_id)
@@ -343,10 +407,14 @@ export function timeRoutes({ get, post, put, del }: Api) {
    */
   post('/timers/stop', async ({ tx, actor, firmId, body }) => {
     const t = (await tx.query(
-      `select *, extract(epoch from (now() - started_at)) / 3600 as elapsed_h from timer where person_id = $1 and ended_at is null`, [actor.id],
+      `select *, extract(epoch from (now() - started_at)) / 3600 as elapsed_h from timer where person_id = $1 and ended_at is null for update`, [actor.id],
     )).rows[0];
+    // FOR UPDATE: a double-click or a second tab waits here, then finds the timer ended and gets NO_TIMER, never a second entry.
     if (!t) throw conflict('NO_TIMER', 'No timer is running.');
-    const end = () => tx.query('update timer set ended_at = now() where id = $1', [t.id]);
+    const end = async () => {
+      const r = await tx.query('update timer set ended_at = now() where id = $1 and ended_at is null', [t.id]);
+      if (!r.rowCount) throw conflict('NO_TIMER', 'No timer is running.');
+    };
     if (body?.discard === true) {
       await end();
       return { time_entry_id: null, duration_hours: hours(0), task_id: null, discarded: true };

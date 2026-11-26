@@ -56,7 +56,7 @@ async function currentTypes(tx: Tx, personId: string): Promise<AccountType[]> {
  * Whoever holds an invite or reset link can set the password, so only a principal may issue one for a sensitive account:
  * a principal or finance account type, or any grant marked sensitive (a sensitive set or a single sensitive capability).
  */
-async function isSensitiveAccount(tx: Tx, personId: string): Promise<boolean> {
+export async function isSensitiveAccount(tx: Tx, personId: string): Promise<boolean> {
   if ((await currentTypes(tx, personId)).some((t) => SENSITIVE_TYPES.includes(t))) return true;
   return Boolean((await tx.query('select 1 from permission_grant where person_id = $1 and sensitive limit 1', [personId])).rowCount);
 }
@@ -68,7 +68,7 @@ export async function revokeOpenLinks(tx: Tx, personId: string, actorId: string)
 }
 
 /** Section 5.3 rule 8: the last active principal keeps principal and keeps access. */
-async function assertNotLastPrincipal(tx: Tx, personId: string) {
+export async function assertNotLastPrincipal(tx: Tx, personId: string) {
   // The same per-firm lock as the platform side (migration 009, platform_assert_not_last_principal): a studio change and
   // a platform change made at the same moment must not both see the other principal and both take it away.
   await tx.query(`select pg_advisory_xact_lock(hashtext('principals:' || firm_id::text)) from person where id = $1`, [personId]);
@@ -256,6 +256,8 @@ export function accountRoutes(api: Api, opts: { secureCookie?: boolean } = {}) {
   post('/accounts/:id/reactivate', async ({ tx, actor, firmId, body, params }) => {
     authorize(actor, 'people.manage');
     const personId = uuidParam(params.id, 'Account');
+    // Never your own account: besides making no sense, the refusal audit would wait on this row lock forever.
+    if (personId === actor.id) throw ruleError('accounts.reactivate', 'You cannot reactivate your own account. Ask another admin or principal.');
     const p = (await tx.query('select login_state, employment_state from person where id = $1 for update', [personId])).rows[0];
     if (!p) throw notFound('Account');
     // Reactivating restores every grant the person still holds, so only a principal may bring back a sensitive account:

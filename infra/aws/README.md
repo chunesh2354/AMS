@@ -182,6 +182,10 @@ is taken from Caddy's `X-Forwarded-For` because the API trusts only loopback pro
   `PATH` does not include `/usr/local/bin`, where the AWS CLI is), and `backup.sh` calls the CLI by its
   absolute path, `/usr/local/bin/aws`. Before this fix every nightly upload failed with `aws: command not found`.
 - Stored as `s3://ams-backups-<account>-<region>/db/ams-<UTC time>.dump`, kept 30 days (bucket lifecycle rule).
+- The bucket is versioned (enabled 2026-11-27). An overwritten or deleted dump keeps its previous version for 30 more days, and
+  the server's role has no `s3:DeleteObjectVersion` or `s3:PutBucketVersioning`, so code on the server cannot destroy a restore point.
+- Still open: every copy is in the same AWS account as the server. If that account closes (free plan ends 2027-05-08), the
+  backups go with it. Copy the dumps to a second account or provider before relying on this for paying studios.
 - Run one now: `sudo ams-backup`.
 - A failure exits non-zero, writes `[ams-backup] ... FAILED at step '...'` to the system log
   (`journalctl -t ams-backup -p err`) and emails `ALERT_EMAIL` through `ams-alert` ("backup FAILED (step)").

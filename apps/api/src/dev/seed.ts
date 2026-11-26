@@ -15,14 +15,18 @@ export async function seed(ownerConn: string, opts: { today?: string } = {}) {
   await db.connect();
   try {
     const exists = await db.query('select id from firm where trading_name = $1', [DEMO_FIRM]);
-    if (exists.rowCount) return exists.rows[0].id as string;
+    if (exists.rowCount) {
+      // Migration 013 moves every mock firm to 'none'; the local demo studio stays on the mock (dev and tests only).
+      await db.query(`update firm set accounting_adapter = 'mock' where id = $1 and accounting_adapter = 'none'`, [exists.rows[0].id]);
+      return exists.rows[0].id as string;
+    }
     await db.query('begin');
     const today = opts.today ?? new Date().toISOString().slice(0, 10);
     const thisWeek = weekStart(today);
     const lastWeek = addDays(thisWeek, -7);
     const passwordHash = await hash(DEMO_PASSWORD);
 
-    const firmId = (await db.query(`insert into firm (legal_name, trading_name, timezone) values ($1,$1,'Asia/Kolkata') returning id`, [DEMO_FIRM])).rows[0].id;
+    const firmId = (await db.query(`insert into firm (legal_name, trading_name, timezone, accounting_adapter) values ($1,$1,'Asia/Kolkata','mock') returning id`, [DEMO_FIRM])).rows[0].id;
     const ins = async (table: string, row: Row) => {
       const keys = ['firm_id', ...Object.keys(row)];
       const vals = [firmId, ...Object.values(row)];

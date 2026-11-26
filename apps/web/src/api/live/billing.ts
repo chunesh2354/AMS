@@ -22,7 +22,7 @@ export type LiveDraftRaw = {
   total: M; external_invoice: { id: string; invoice_no: string } | null; job: { status: string; last_error: string | null; adapter: string } | null; lines?: LiveLine[];
 };
 export type LiveWipRaw = { project: Proj; awaiting_approval_hours: unknown; approved_unbilled_hours: unknown; reserved_hours: unknown; ready: M; in_drafts: M; invoiced: M; label: string };
-export type LiveIntegrations = { accounting: { adapter: string; label: string; mode: 'MOCK' | 'CSV'; last_success: string | null; last_error: string | null } };
+export type LiveIntegrations = { accounting: { adapter: string; label: string; mode: 'MOCK' | 'CSV' | 'NONE'; last_success: string | null; last_error: string | null } };
 
 /** Extra live state kept beside the mock-shaped draft row. */
 export type LiveDraftMeta = { uuid: string; approvalState: string; accountingState: string; pmConfirmed: boolean; invoiceNo: string | null; jobError: string | null };
@@ -43,7 +43,7 @@ export const mapException = (e: LiveExceptionRaw): NteException => ({
 
 /** Draft status shown in the list: accounting state wins once the draft has left approval. */
 export function draftStatus(d: Pick<LiveDraftRaw, 'approval_state' | 'accounting_state'>): Status {
-  if (d.accounting_state && d.accounting_state !== 'Not sent' && d.accounting_state !== 'Unsent') return asStatus(d.accounting_state === 'Pending' ? 'Pending (accounting)' : d.accounting_state);
+  if (d.accounting_state && d.accounting_state !== 'Not sent' && d.accounting_state !== 'Not submitted' && d.accounting_state !== 'Unsent') return asStatus(d.accounting_state === 'Pending' ? 'Pending (accounting)' : d.accounting_state);
   return asStatus(d.approval_state);
 }
 
@@ -69,7 +69,7 @@ export const mapWip = (w: LiveWipRaw): WipRowLive => {
 };
 
 export const mapAccounting = (i: LiveIntegrations) => ({
-  adapter: i.accounting.label, mode: i.accounting.mode, status: asStatus(i.accounting.last_error ? 'Failed' : 'Enabled'),
+  adapter: i.accounting.label, mode: i.accounting.mode === 'NONE' ? 'Not configured' as const : i.accounting.mode, status: asStatus(i.accounting.mode === 'NONE' ? 'Not configured' : i.accounting.last_error ? 'Failed' : 'Enabled'),
   lastSuccess: i.accounting.last_success ? new Date(i.accounting.last_success).toLocaleString('en-IN') : 'Not set', sent: i.accounting.last_error ?? 'No errors',
 });
 

@@ -10,6 +10,7 @@ import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
 import { findProject } from '../projects/projects.routes';
 import { routeApprover } from '../approvals/approvals.routes';
+import { isProduction } from '../../config/env';
 import { adapterFor, AdapterTimeout, type AdapterResult } from '../integrations/adapters/accounting';
 import type { Api } from '../../http/api';
 import { feeAuthorizationRoutes } from './authorizations.routes';
@@ -389,6 +390,13 @@ export function billingRoutes(api: Api) {
     try { transition('draftAccounting', d.accounting_state, 'submit'); } catch (e) { rethrowTransition(e); }
     const firm = (await tx.query('select accounting_adapter from firm')).rows[0];
     const adapter = adapterFor(firm.accounting_adapter);
+    if (adapter.key === 'none') {
+      // Nothing is sent and no invoice is invented: the draft waits (Pending) for the invoice the studio raises in its own
+      // accounting software, recorded through import-final, as in the CSV workflow.
+      await tx.query(`update billing_draft set accounting_state = 'Pending', updated_at = now() where id = $1`, [d.id]);
+      await audit(tx, actor, firmId, { recordType: 'billing_draft', recordId: d.id, action: 'submit', next: { adapter: 'none' } });
+      return { accounting_state: 'Pending', adapter: adapter.label, message: `No accounting system is connected, so nothing was sent. Raise ${d.draft_no} in your accounting software, then record its invoice number here.` };
+    }
     const job = (await tx.query(
       `insert into integration_job (firm_id, adapter, direction, record_type, record_id, idempotency_key, attempts, status, created_by) values ($1,$2,'outbound','billing_draft',$3,$4,1,'Running',$5)
        on conflict (firm_id, idempotency_key) do update set attempts = integration_job.attempts + 1, status = 'Running', updated_at = now() returning id`,
@@ -396,7 +404,7 @@ export function billingRoutes(api: Api) {
     )).rows[0];
     await audit(tx, actor, firmId, { recordType: 'billing_draft', recordId: d.id, action: 'submit', next: { adapter: adapter.key } });
     try {
-      const result = await adapter.submitDraft({ draftNo: d.draft_no, net: await draftTotal(tx, d.id) }, d.idempotency_key, { simulate: adapter.key === 'mock' ? body.simulate : undefined });
+      const result = await adapter.submitDraft({ draftNo: d.draft_no, net: await draftTotal(tx, d.id) }, d.idempotency_key, { simulate: adapter.key === 'mock' && !isProduction() ? body.simulate : undefined });
       await tx.query(`update integration_job set status = 'Succeeded', external_id = $2, updated_at = now() where id = $1`, [job.id, result?.external_id ?? null]);
       if (!result) {
         await tx.query(`update billing_draft set accounting_state = 'Pending', updated_at = now() where id = $1`, [d.id]);

@@ -25,13 +25,17 @@ BUCKET="ams-backups-${ACCOUNT}-${AWS_REGION}"
 ROLE=ams-server
 echo "account ${ACCOUNT}, region ${AWS_REGION}, domain ${AMS_DOMAIN}, branch ${AMS_BRANCH}"
 
-# 1. Backup bucket: private, encrypted, dumps expire after 30 days.
+# 1. Backup bucket: private, encrypted, versioned; dumps expire after 30 days (older versions 30 days later).
 if ! aws_ s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   aws_ s3api create-bucket --bucket "$BUCKET" --create-bucket-configuration "LocationConstraint=${AWS_REGION}" >/dev/null
 fi
 aws_ s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws_ s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
-aws_ s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration '{"Rules":[{"ID":"expire-db-dumps","Status":"Enabled","Filter":{"Prefix":"db/"},"Expiration":{"Days":30}}]}'
+# Versioning: an overwrite or delete keeps the previous version. The server's role has no s3:DeleteObjectVersion or
+# s3:PutBucketVersioning, so even code running on the server cannot destroy or rewrite an existing restore point.
+aws_ s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+# Current dumps expire after 30 days; a replaced or expired version is kept 30 more days, then removed.
+aws_ s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration '{"Rules":[{"ID":"expire-db-dumps","Status":"Enabled","Filter":{"Prefix":"db/"},"Expiration":{"Days":30},"NoncurrentVersionExpiration":{"NoncurrentDays":30},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":7}},{"ID":"clean-delete-markers","Status":"Enabled","Filter":{"Prefix":"db/"},"Expiration":{"ExpiredObjectDeleteMarker":true}}]}'
 aws_ s3api put-bucket-tagging --bucket "$BUCKET" --tagging "TagSet=[{Key=Project,Value=ams}]"
 echo "bucket ${BUCKET}"
 

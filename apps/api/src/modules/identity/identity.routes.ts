@@ -9,7 +9,7 @@ import { isUuid, required, uuidParam } from '../../http/validation';
 import { withFirm } from '../../db/pool';
 import { SESSION_COOKIE } from '../../auth/sessions';
 import type { Api } from '../../http/api';
-import { assertPassword, revokeOpenLinks } from '../accounts/accounts.routes';
+import { assertNotLastPrincipal, assertPassword, isSensitiveAccount, revokeOpenLinks } from '../accounts/accounts.routes';
 
 const SESSION_DAYS = 14;
 const DUMMY_HASH = hash('not-a-real-password');
@@ -107,24 +107,28 @@ export function authRoutes(api: Api, opts: { secureCookie?: boolean }) {
     return { id: row.id, audit_event_id };
   });
 
-  // Section 5.3 rules 7 and 8.
+  // Section 5.3 rules 7 and 8. The same rules as POST /accounts/:id/deactivate: the last principal keeps access (under the
+  // per-firm principals lock, counting only accepted, active principals), only a principal may revoke a principal, finance
+  // or other sensitive account, and the person's open invite and reset links stop working with their sessions.
   post('/people/:id/revoke-access', async ({ tx, actor, firmId, params }) => {
     authorize(actor, 'people.manage');
     const personId = uuidParam(params.id, 'Person');
+    const p = (await tx.query('select login_state from person where id = $1 for update', [personId])).rows[0];
+    if (!p) throw notFound('Person');
     const isPrincipal = (await tx.query(
       `select 1 from permission_grant g join permission_set s on s.id = g.permission_set_id where g.person_id = $1 and s.key = 'principal'`, [personId],
     )).rowCount;
-    if (isPrincipal) {
-      const others = (await tx.query(
-        `select count(distinct g.person_id)::int n from permission_grant g join permission_set s on s.id = g.permission_set_id join person p on p.id = g.person_id
-         where s.key = 'principal' and p.login_state = 'Enabled' and g.person_id <> $1`, [personId],
-      )).rows[0].n;
-      if (!others) throw ruleError('5.3.8', 'The last principal cannot lose access until another is assigned.');
+    if (isPrincipal) await assertNotLastPrincipal(tx, personId);
+    if (personId === actor.id) throw ruleError('accounts.deactivate', 'You cannot revoke your own access. Ask another admin or principal.');
+    if (await isSensitiveAccount(tx, personId) && !can(actor, 'permissions.grant.sensitive')) {
+      const message = 'Only a principal can revoke access for a principal, finance or other sensitive account.';
+      await withFirm(pool, firmId, (w) => audit(w, actor, firmId, { recordType: 'person', recordId: personId, action: 'grant_refused', next: { action: 'revoke_access' }, reason: message }));
+      throw new ApiError(403, 'FORBIDDEN_CAPABILITY', message, [], { capability: 'permissions.grant.sensitive' });
     }
-    const r = await tx.query(`update person set login_state = 'Revoked', updated_by = $2, updated_at = now() where id = $1 returning id`, [personId, actor.id]);
-    if (!r.rowCount) throw notFound('Person');
+    await tx.query(`update person set login_state = 'Revoked', updated_by = $2, updated_at = now() where id = $1`, [personId, actor.id]);
     await tx.query('update session set revoked_at = now() where person_id = $1 and revoked_at is null', [personId]);
-    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'person', recordId: personId, action: 'revoke_access', next: { login_state: 'Revoked' } });
+    await revokeOpenLinks(tx, personId, actor.id);
+    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'person', recordId: personId, action: 'revoke_access', previous: { login_state: p.login_state }, next: { login_state: 'Revoked' } });
     return { ok: true, audit_event_id };
   });
 

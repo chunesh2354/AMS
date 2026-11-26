@@ -3,7 +3,7 @@ export type AdapterResult = { external_id: string; invoice_no: string; issue_dat
 export class AdapterTimeout extends Error {}
 
 export type AccountingAdapter = {
-  key: 'mock' | 'csv';
+  key: 'none' | 'mock' | 'csv';
   label: string;
   /** Returns the finalized invoice, or null when finalization happens later through import-final. */
   submitDraft(draft: { draftNo: string; net: string }, key: string, opts: { simulate?: string }): Promise<AdapterResult | null>;
@@ -47,4 +47,13 @@ export const CsvExportImportAdapter: AccountingAdapter = {
   async lookupByKey() { return null; },
 };
 
-export const adapterFor = (key: string): AccountingAdapter => (key === 'csv' ? CsvExportImportAdapter : MockAccountingAdapter);
+/** No accounting system connected (the default for real studios): nothing is sent, so nothing can be finalized here. */
+export const NoAccountingAdapter: AccountingAdapter = {
+  key: 'none',
+  label: 'No accounting system connected',
+  async submitDraft() { throw new Error('No accounting system is connected.'); },
+  async lookupByKey() { return null; },
+};
+
+/** An unknown or missing value is 'none', never the mock: a studio must never get fake invoices by accident. */
+export const adapterFor = (key: string): AccountingAdapter => (key === 'csv' ? CsvExportImportAdapter : key === 'mock' ? MockAccountingAdapter : NoAccountingAdapter);

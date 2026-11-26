@@ -25,6 +25,7 @@ import { TimesheetGrid } from '../../ui/TimesheetGrid';
 import { useToast } from '../../ui/Toast';
 import { formatHours } from '../../ui/format';
 import type { Status } from '../../ui/status-colors';
+import { StopTimerSheet, timerNeedsHours, type TimerNeedsHours } from '../shared/stop-timer-sheet';
 
 const LONG: Record<string, string> = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
 const mockProjects = getProjectPhaseOptions();
@@ -56,6 +57,7 @@ export function MyTimeScreen() {
   const [picking, setPicking] = useState<{ lineId: string | null } | null>(null);
   const [phase, setPhase] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
+  const [stopAsk, setStopAsk] = useState<TimerNeedsHours | null>(null);
   const [corrLine, setCorrLine] = useState<string | null>(null);
   const [corrMinutes, setCorrMinutes] = useState<number | null>(null);
   const [corrReason, setCorrReason] = useState('');
@@ -145,7 +147,11 @@ export function MyTimeScreen() {
   };
   const timerStop = () => {
     if (!live) { timer.stop(); return; }
-    stopTimer().then(() => { timer.stop(); retry(); }, (e) => toast({ variant: 'danger', message: failureMessage(e) }));
+    stopTimer().then(() => { timer.stop(); retry(); }, (e) => {
+      // A timer that ran past a day, or whose day is full, asks for the hours instead of failing (as the top bar does).
+      const ask = timerNeedsHours(e);
+      if (ask) setStopAsk(ask); else toast({ variant: 'danger', message: failureMessage(e) });
+    });
   };
   const primary = readOnlyWeek
     ? <Button variant="primary" onClick={() => { setCorrLine(corrOptions[0]?.value ?? null); setCorrMinutes(null); setCorrReason(''); setTried(false); setCorrecting(true); }}>Request correction</Button>
@@ -217,6 +223,13 @@ export function MyTimeScreen() {
           </FormSection>
         </Form>
       </Sheet>
+      {stopAsk && (
+        <StopTimerSheet
+          ask={stopAsk}
+          onClose={() => setStopAsk(null)}
+          onStopped={(message) => { setStopAsk(null); timer.stop(); retry(); toast({ variant: 'success', message }); }}
+        />
+      )}
     </div>
   );
 }
