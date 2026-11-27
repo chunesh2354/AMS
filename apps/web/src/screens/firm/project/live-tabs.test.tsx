@@ -43,6 +43,8 @@ const PROJECT = {
     { id: 'ph-b', code: 'MS', name: 'Massing studies', start_date: '2026-11-02', end_date: '2027-01-29', owner: { id: 'u-pm', ref_code: 'Q02', name: 'Nila Varma' },
       budget_hours: '200.00', actual_hours: '20.00', etc_hours: '210.00', forecast_hours: '230.00', delivery_progress_pct: 12, fee: { restricted: true }, status: 'Not started' },
   ],
+  // The PM leads this project: the server lets them change its phases.
+  permissions: { edit_phases: true, change_status: true, archive: false },
 };
 
 let me = ME({ 'projects.plan': 'scoped', 'billing.prepare': 'scoped' });
@@ -95,6 +97,33 @@ describe('project overview in live mode', () => {
     expect(called(/\/api\/v1\/projects\/LV-77$/)).toBe(true);
   });
 
+  it('a phase with no owner reads No owner (no avatar) and no hours budget reads Not set, as on the Phases tab', async () => {
+    const project = {
+      ...PROJECT,
+      phases: [...PROJECT.phases, {
+        id: 'ph-c', code: 'CN', name: 'Concept narrative', start_date: null, end_date: null, owner: null,
+        budget_hours: null, actual_hours: '0.00', etc_hours: '0.00', forecast_hours: '0.00', delivery_progress_pct: 0, fee: m('0.00'), status: 'Not started',
+      }],
+    };
+    handler = (url) => (url.endsWith('/me') ? { status: 200, body: me } : url.endsWith('/projects/LV-77') ? { status: 200, body: project } : undefined);
+    open('/firm/projects/LV-77');
+    const table = await screen.findByRole('region', { name: 'Phases' });
+    // The owner column is hidden by default: show it through the column picker.
+    await userEvent.click(screen.getByRole('button', { name: 'Columns' }));
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Owner' }));
+    const row = within(table).getByRole('rowheader', { name: 'Concept narrative' }).closest('tr')!;
+    expect(within(row).getByText('No owner')).toBeInTheDocument();
+    expect(within(row).getByText('Not set')).toBeInTheDocument();
+    expect(within(row).queryByText('NO')).toBeNull();
+    expect(within(row).queryByText('None')).toBeNull();
+    expect(row.querySelector('.dt__person')).toBeNull();
+    // An owned phase still shows the owner's name with an avatar, and its budget.
+    const owned = within(table).getByRole('rowheader', { name: 'Brief and survey' }).closest('tr')!;
+    expect(within(owned).getByText('Ines Kuruvilla')).toBeInTheDocument();
+    expect(owned.querySelector('.dt__person')).not.toBeNull();
+    expect(within(owned).getByText('110')).toBeInTheDocument();
+  });
+
   it('shows the permission state when the server refuses', async () => {
     handler = (url) => (url.endsWith('/me') ? { status: 200, body: me }
       : url.endsWith('/projects/LV-77') ? { status: 403, body: { error: { code: 'FORBIDDEN_CAPABILITY', message: 'You are not a member of this project.' } } } : undefined);
@@ -139,7 +168,8 @@ describe('project phases in live mode', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Actions for Massing studies' }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }));
     const sheet = await screen.findByRole('dialog', { name: 'Edit phase' });
-    expect(within(sheet).queryByLabelText('Owner')).toBeNull();
+    // Owner, status, dates and budget now have endpoints, so the live sheet offers them (contract Web 3).
+    expect(within(sheet).getByRole('combobox', { name: 'Owner' })).toBeInTheDocument();
     const etc = within(sheet).getByLabelText('ETC (h)');
     await userEvent.clear(etc); await userEvent.type(etc, '190');
     const delivery = within(sheet).getByLabelText('Delivery (%)');
@@ -161,6 +191,9 @@ describe('project phases in live mode', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Actions for Brief and survey' }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }));
     const sheet = await screen.findByRole('dialog', { name: 'Edit phase' });
+    // Save sends only what changed, so change the ETC to make it send the progress.
+    const etc = within(sheet).getByLabelText('ETC (h)');
+    await userEvent.clear(etc); await userEvent.type(etc, '5');
     await userEvent.click(within(sheet).getByRole('button', { name: 'Save phase' }));
     expect(await screen.findByText('You need projects.plan on this project.')).toBeInTheDocument();
   });

@@ -94,7 +94,23 @@ async function taskFor(tx: Tx, body: any, lenient = false): Promise<{ task_id: s
   return { task_id: t.id, phase_id: t.phase_id };
 }
 
-async function classify(tx: Tx, body: any, actor: Actor, lenient = false) {
+/**
+ * New time on closed work is refused (422): an Archived project or a Cancelled phase. On hold and Complete still take
+ * time (late touches happen). Stopping a running timer, corrections and lowering or clearing hours never check this.
+ */
+function assertOpenForTime(r: { project_status: string; phase_status: string; project_code: string; phase_name: string }) {
+  if (r.project_status === 'Archived') throw new ApiError(422, 'PROJECT_CLOSED', `${r.project_code} is archived. Time can no longer be logged on it.`, [{ field: 'phase_id', code: 'project_closed' }], { rule: 'PROJECT_CLOSED' });
+  if (r.phase_status === 'Cancelled') throw new ApiError(422, 'PHASE_CANCELLED', `${r.phase_name} on ${r.project_code} is cancelled. Time can no longer be logged on it.`, [{ field: 'phase_id', code: 'phase_cancelled' }], { rule: 'PHASE_CANCELLED' });
+}
+async function assertPhaseOpenForTime(tx: Tx, phaseId: string | null | undefined) {
+  if (!phaseId || !isUuid(phaseId)) return;
+  const r = (await tx.query(
+    'select ph.status as phase_status, ph.name as phase_name, pr.status as project_status, pr.code as project_code from phase ph join project pr on pr.id = ph.project_id where ph.id = $1', [phaseId],
+  )).rows[0];
+  if (r) assertOpenForTime(r);
+}
+
+async function classify(tx: Tx, body: any, actor: Actor, lenient = false, guard = false) {
   if (body.phase_id && body.internal_category_id) throw ruleError('R2', 'A line is either project work or internal work, never both.');
   const task = await taskFor(tx, body, lenient);
   body = { ...body, phase_id: task.phase_id };
@@ -105,15 +121,16 @@ async function classify(tx: Tx, body: any, actor: Actor, lenient = false) {
   if (!actor.memberProjects.includes(ph.project_id) && ph.pm_id !== actor.id && ph.principal_id !== actor.id) {
     throw new ApiError(403, 'NOT_PROJECT_MEMBER', "You are not on this project's team. Ask the project manager to add you.");
   }
+  if (guard) await assertPhaseOpenForTime(tx, ph.id);
   return { project_id: ph.project_id, phase_id: ph.id, fee_component_id: await resolveFeeComponent(tx, ph.id, body.fee_component_id), task_id: task.task_id };
 }
 
-async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any, lenient = false) {
+async function insertEntry(tx: Tx, actor: Actor, firmId: string, body: any, lenient = false, guard = true) {
   const date = isoDate(body.service_date, 'service_date');
   const duration = Number(body.duration_hours);
   if (!(duration > 0)) throw new ApiError(400, 'VALIDATION', 'Duration must be above zero.', [{ field: 'duration_hours', code: 'range' }]);
   await assertDayRoom(tx, actor.id, date, duration);
-  const c = await classify(tx, body, actor, lenient);
+  const c = await classify(tx, body, actor, lenient, guard);
   const ts = await ensureTimesheet(tx, firmId, actor.id, date);
   // R11: no budget, cap or NTE check happens here, by design. Actual work can always be recorded.
   return (await tx.query(
@@ -215,7 +232,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     const ref = body.phase_id ?? body.internal_category_id ?? body.entry_id;
     if (!ref) throw new ApiError(400, 'VALIDATION', 'Say which line this cell belongs to.', [{ field: 'phase_id', code: 'required' }]);
     const existing = (await tx.query(
-      `select id, approval_state, timesheet_id, corrected_from_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`,
+      `select id, approval_state, timesheet_id, corrected_from_id, duration_hours, phase_id from time_entry where person_id = $1 and service_date = $2 and ${where} and approval_state <> 'Amended'`,
       body.phase_id ? [actor.id, date, ref, taskId] : [actor.id, date, ref],
     )).rows;
     if (existing.some((e) => !['Draft', 'Returned'].includes(e.approval_state))) throw conflict('LOCKED', 'Submitted or approved hours cannot be edited. Request a correction instead.');
@@ -225,6 +242,13 @@ export function timeRoutes({ get, post, put, del }: Api) {
       throw conflict('RETURNED_CORRECTION', 'These hours are a returned correction. Set the cell to 0 to withdraw it, then use Request correction again.');
     }
     await assertDayRoom(tx, actor.id, date, value, existing.map((e) => e.id));
+    // More hours than the cell holds is new time: refused on an archived project or a cancelled phase (lowering is not).
+    // The cell's own rows say which phase it is on, so a cell keyed by entry_id is checked too.
+    if (existing.length && value > existing.reduce((sum, e) => sum + Number(e.duration_hours), 0) + 0.001) {
+      const onPhases = new Set<string>(existing.map((e) => e.phase_id as string | null).filter((x): x is string => !!x));
+      if (body.phase_id) onPhases.add(body.phase_id);
+      for (const phaseId of onPhases) await assertPhaseOpenForTime(tx, phaseId);
+    }
     if (existing.length && value > 0) {
       await tx.query(`update time_entry set duration_hours = $2, updated_by = $3, updated_at = now() where id = $1`, [existing[0].id, value, actor.id]);
       await deleteEntries(tx, actor, firmId, existing.slice(1));
@@ -257,6 +281,11 @@ export function timeRoutes({ get, post, put, del }: Api) {
       }, actor)
       : e;
     const duration = body.duration_hours ?? e.duration_hours;
+    // Moving an entry to another phase, or raising its hours, is new time there. Lowering it is not, and nor is
+    // editing a returned correction (its hours are a difference against approved time; corrections stay allowed).
+    const moved = reclass && c.phase_id && c.phase_id !== e.phase_id;
+    const raised = !e.corrected_from_id && Number(duration) > Number(e.duration_hours) + 0.001;
+    if (c.phase_id && (moved || raised)) await assertPhaseOpenForTime(tx, c.phase_id);
     await assertDayRoom(tx, actor.id, e.service_date, Number(duration), [id]);
     await tx.query(
       `update time_entry set project_id = $2, phase_id = $3, internal_category_id = $4, fee_component_id = $5, duration_hours = $6, note = $7, billing_state = $8, updated_by = $9, updated_at = now(), task_id = $10 where id = $1`,
@@ -392,7 +421,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     if (!body.phase_id && !body.internal_category_id && !body.task_id) throw ruleError('F10', 'A timer needs a project phase (or a task) or an internal category.');
     const running = await tx.query('select id from timer where person_id = $1 and ended_at is null', [actor.id]);
     if (running.rowCount) throw conflict('TIMER_RUNNING', 'A timer is already running.', { conflicting_id: running.rows[0].id });
-    const c = await classify(tx, body, actor);
+    const c = await classify(tx, body, actor, false, true);
     const t = (await tx.query(
       `insert into timer (firm_id, person_id, project_id, phase_id, internal_category_id, created_by, task_id) values ($1,$2,$3,$4,$5,$2,$6) returning id, started_at`,
       [firmId, actor.id, c.project_id, c.phase_id, body.internal_category_id ?? null, c.task_id],
@@ -447,7 +476,7 @@ export function timeRoutes({ get, post, put, del }: Api) {
     }
     await end();
     // The timer's task, if it still fits its phase (a task that moved meanwhile is dropped rather than losing the time).
-    const entry = await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id, task_id: t.task_id }, true);
+    const entry = await insertEntry(tx, actor, firmId, { service_date: date, duration_hours: duration, phase_id: t.phase_id, internal_category_id: t.internal_category_id, task_id: t.task_id }, true, false);
     return { time_entry_id: entry.id, duration_hours: hours(duration), task_id: entry.task_id ?? null };
   });
 

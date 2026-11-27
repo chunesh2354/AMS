@@ -1,4 +1,4 @@
-import { notFound } from '../../http/errors';
+import { conflict, notFound } from '../../http/errors';
 import { audit } from '../../audit/audit';
 import { notify } from '../../audit/notify';
 import { assertProjectVisible, authorize, visibleProjects } from '../../auth/authorize';
@@ -108,7 +108,7 @@ export function scheduleRoutes(api: Api) {
     return {
       today: clock.today, timezone: clock.tz, as_of: clock.as_of,
       project: { id: p.id, code: p.code, name: p.name, client: p.client_name, status: p.status, hold_reason: p.hold_reason, pm: { id: p.pm_id, ref_code: p.pm_ref, name: p.pm_name } },
-      can_reschedule: mayPlan(actor, p.id),
+      can_reschedule: p.status !== 'Archived' && mayPlan(actor, p.id),
       ...rest,
       blocking_overdue_tasks: blocking_overdue_tasks.length,
       definition: SCHEDULE_DEFINITION,
@@ -141,7 +141,7 @@ export function scheduleRoutes(api: Api) {
       const plan = plans.get(p.id)!;
       return {
         project: { id: p.id, code: p.code, name: p.name, client: p.client, status: p.status, hold_reason: p.hold_reason, pm: { id: p.pm_id, ref_code: p.pm_ref, name: p.pm_name } },
-        can_reschedule: mayPlan(actor, p.id),
+        can_reschedule: p.status !== 'Archived' && mayPlan(actor, p.id),
         planned_start: plan.planned_start, planned_end: plan.planned_end, forecast_end: plan.forecast_end,
         slip_days: plan.slip_days, end_slip_days: plan.end_slip_days, slip_driver: plan.slip_driver,
         progress_pct: plan.progress_pct, hours: plan.hours,
@@ -164,6 +164,9 @@ export function scheduleRoutes(api: Api) {
     const doCascade = cascadeOf(body.cascade);
     const project = await findProject(tx, ph.project_id);
     await lockProject(tx, project.id);
+    // Read under the lock: an archived project must be restored before its phases change (as PUT /phases/:id).
+    const locked = (await tx.query('select status from project where id = $1', [project.id])).rows[0];
+    if (locked.status === 'Archived') throw conflict('PROJECT_CLOSED', 'Restore the project before changing it.');
 
     const moved: Moved[] = [];
     let audit_event_id: string | null = null;

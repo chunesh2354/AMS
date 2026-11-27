@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getProjectTab, getProjectTimeLive, mapProjectTimeRow, nameOf, savePhaseProgress, type ApiProjectTimeRow } from './project-tabs';
+import { getProjectTab, getProjectTimeLive, mapProjectTimeRow, nameOf, savePhaseProgress, updatePhase, type ApiProjectTimeRow } from './project-tabs';
+import { setProjectStatus } from './projects';
 import type { ApiProject } from './projects';
 
 const m = (amount: string) => ({ amount, currency: 'INR' });
@@ -52,6 +53,26 @@ describe('project tab getters', () => {
     expect(calls[0].url).toBe('/api/v1/phases/ph1/progress');
     expect(calls[0].init.method).toBe('PUT');
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ etc_hours: 80, delivery_progress_pct: 55 });
+  });
+
+  it('sends only the given fields to PUT /phases/:id', async () => {
+    reply = { status: 200, body: PROJECT.phases[0] };
+    await updatePhase('ph1', { status: 'Complete', owner_id: null });
+    expect(calls[0].url).toBe('/api/v1/phases/ph1');
+    expect(calls[0].init.method).toBe('PUT');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ status: 'Complete', owner_id: null });
+  });
+
+  it('sends a reason to PUT /projects/:code/status only for On hold and Archived', async () => {
+    reply = { status: 200, body: { status: 'On hold', hold_reason: 'Funding', audit_event_id: 'e1' } };
+    await setProjectStatus('PRJ-01', { status: 'On hold', reason: 'Funding' });
+    await setProjectStatus('PRJ-01', { status: 'Active', reason: 'ignored' });
+    await setProjectStatus('PRJ-01', { status: 'Archived', reason: 'Done' });
+    expect(calls.map((c) => [c.url, c.init.method, JSON.parse(String(c.init.body))])).toEqual([
+      ['/api/v1/projects/PRJ-01/status', 'PUT', { status: 'On hold', reason: 'Funding' }],
+      ['/api/v1/projects/PRJ-01/status', 'PUT', { status: 'Active' }],
+      ['/api/v1/projects/PRJ-01/status', 'PUT', { status: 'Archived', reason: 'Done' }],
+    ]);
   });
 
   it('maps project time rows and derives one status per row', async () => {

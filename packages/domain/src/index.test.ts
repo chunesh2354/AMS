@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, capabilityMap, fixedFeeClaim, fromPaise, hoursValue, InvalidTransition, levelFor, MACHINES, nteSplit, outstandingPaise, percentFee, rechargeAmount, toPaise, transition, weekStart } from './index';
+import { addDays, capabilityMap, fixedFeeClaim, fromPaise, hoursValue, InvalidTransition, levelFor, MACHINES, nteSplit, outstandingPaise, percentFee, PHASE_STATUSES, PROJECT_STATUSES, rechargeAmount, toPaise, transition, weekStart } from './index';
 
 describe('worked calculations (spec 15.4)', () => {
   it('fixed fee claim: 60% of 4,00,000 less 1,60,000 billed is 80,000', () => {
@@ -85,6 +85,31 @@ describe('state machines', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidTransition);
       expect((e as InvalidTransition).allowed).toEqual(['approve', 'return']);
+    }
+  });
+  it('project status: hold, resume, deliver, archive and restore; Draft is never a target and Archived only restores', () => {
+    expect(transition('projectStatus', 'Active', 'On hold')).toBe('On hold');
+    expect(transition('projectStatus', 'On hold', 'Active')).toBe('Active');
+    expect(transition('projectStatus', 'On hold', 'Delivery complete')).toBe('Delivery complete');
+    expect(transition('projectStatus', 'Delivery complete', 'Active')).toBe('Active');
+    expect(transition('projectStatus', 'Draft', 'Active')).toBe('Active');
+    expect(transition('projectStatus', 'Archived', 'Active')).toBe('Active');
+    for (const s of PROJECT_STATUSES) expect(() => transition('projectStatus', s, 'Draft')).toThrow(InvalidTransition);
+    try {
+      transition('projectStatus', 'Archived', 'On hold');
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as InvalidTransition).allowed).toEqual(['Active']);
+    }
+    expect(() => transition('projectStatus', 'Delivery complete', 'On hold')).toThrow(InvalidTransition);
+    expect(() => transition('projectStatus', 'Active', 'Active')).toThrow(InvalidTransition);
+  });
+  it('phase status: any of the four to any other, never to itself', () => {
+    for (const from of PHASE_STATUSES) {
+      for (const to of PHASE_STATUSES) {
+        if (from === to) expect(() => transition('phaseStatus', from, to)).toThrow(InvalidTransition);
+        else expect(transition('phaseStatus', from, to)).toBe(to);
+      }
     }
   });
   it('Uncertain can never go straight to submit', () => {

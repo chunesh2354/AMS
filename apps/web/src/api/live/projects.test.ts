@@ -47,3 +47,20 @@ describe('live project mapping', () => {
     expect(riskOf('Active', null, 90).label).toBe('No budget');
   });
 });
+
+describe('live phase and status fields', () => {
+  it('keeps a missing owner, dates and hours budget as unset, never NaN', () => {
+    const v = mapProject({
+      ...base,
+      phases: [{ ...base.phases[0], start_date: null, end_date: null, owner: null, budget_hours: null }],
+    });
+    expect(v.phases[0]).toMatchObject({ code: 'SD', start: '', end: '', ownerId: '', owner: null, budget: 0, budgetHours: null });
+    expect(mapProject(base).phases[0]).toMatchObject({ owner: { id: 'p4', ref_code: 'P04', name: 'Rohan' }, budgetHours: 200 });
+  });
+
+  it('carries the server permissions, the PM and the hold reason, and grants nothing when permissions are absent', () => {
+    expect(mapProject(base).live.permissions).toEqual({ edit_phases: false, change_status: false, archive: false });
+    const v = mapProject({ ...base, status: 'On hold', hold_reason: 'Funding', permissions: { edit_phases: true, change_status: true, archive: false } });
+    expect(v.live).toMatchObject({ holdReason: 'Funding', pm: { id: 'p2', ref_code: 'P02', name: 'Asha' }, permissions: { edit_phases: true, change_status: true, archive: false } });
+  });
+});

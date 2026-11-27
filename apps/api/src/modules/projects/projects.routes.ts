@@ -1,10 +1,11 @@
-import { fixedFeeClaim, fromPaise, hoursValue, toPaise } from '@ams/domain';
-import { ApiError, conflict, notFound, ruleError } from '../../http/errors';
+import { fixedFeeClaim, fromPaise, hoursValue, PHASE_STATUSES, toPaise, transition } from '@ams/domain';
+import { ApiError, conflict, notFound, rethrowTransition, ruleError } from '../../http/errors';
 import { assertProjectVisible, authorize, can, visibleProjects } from '../../auth/authorize';
 import { audit } from '../../audit/audit';
+import { notify } from '../../audit/notify';
 import { fenceAggregate } from '../../auth/redaction';
 import { hours, list, money } from '../../http/responses';
-import { isUuid, moneyAmount, required, uuidParam } from '../../http/validation';
+import { isoDate, isUuid, moneyAmount, required, uuidParam } from '../../http/validation';
 import type { Actor } from '../../auth/actor';
 import type { Tx } from '../../db/pool';
 import type { Api } from '../../http/api';
@@ -26,10 +27,21 @@ export async function phasesOf(tx: Tx, projectId: string) {
   return (await tx.query(
     `select ph.*, o.ref_code as owner_ref, o.name as owner_name,
        coalesce((select sum(bl.hours) from budget_line bl join budget_version bv on bv.id = bl.budget_version_id where bl.phase_id = ph.id and bv.status = 'Approved'), 0) as budget_hours,
+       exists (select 1 from budget_line bl join budget_version bv on bv.id = bl.budget_version_id where bl.phase_id = ph.id and bv.status = 'Approved') as has_budget,
        ph.opening_actual_hours + coalesce((select sum(te.duration_hours) from time_entry te where te.phase_id = ph.id and ${ACTUAL_SQL}), 0) as actual_hours,
        coalesce((select sum(a.amount) from phase_fee_allocation a where a.phase_id = ph.id), 0) as fee
      from phase ph left join person o on o.id = ph.owner_id where ph.project_id = $1 order by ph.sort_order`, [projectId],
   )).rows;
+}
+
+/** One phase as GET /projects/:code shows it (also the response of PUT /phases/:id). Dates and budget are null when unset. */
+export function phaseView(x: any) {
+  return {
+    id: x.id, code: x.code, name: x.name, start_date: x.start_date ?? null, end_date: x.end_date ?? null,
+    owner: x.owner_id ? { id: x.owner_id, ref_code: x.owner_ref, name: x.owner_name } : null,
+    budget_hours: x.has_budget ? hours(x.budget_hours) : null, actual_hours: hours(x.actual_hours), etc_hours: hours(x.etc_hours), forecast_hours: hours(Number(x.actual_hours) + Number(x.etc_hours)),
+    delivery_progress_pct: Number(x.delivery_progress_pct), fee: money(x.fee), status: x.status,
+  };
 }
 
 /** Four separate values (R9). Delivery progress lives on the phase and never feeds these. */
@@ -70,11 +82,13 @@ export async function labourOf(tx: Tx, projectId: string) {
 
 export async function projectView(tx: Tx, p: any, actor: Actor) {
   const phases = await phasesOf(tx, p.id);
-  const budget = phases.reduce((s, x) => s + Number(x.budget_hours), 0);
-  const actual = phases.reduce((s, x) => s + Number(x.actual_hours), 0);
-  const etc = phases.reduce((s, x) => s + Number(x.etc_hours), 0);
-  const weight = phases.reduce((s, x) => s + Number(x.fee), 0);
-  const delivery = weight ? phases.reduce((s, x) => s + Number(x.delivery_progress_pct) * Number(x.fee), 0) / weight : 0;
+  // Cancelled phases stay in the phases list but out of the project's hours and delivery (as schedule/plan.ts).
+  const live = phases.filter((x) => x.status !== 'Cancelled');
+  const budget = live.reduce((s, x) => s + Number(x.budget_hours), 0);
+  const actual = live.reduce((s, x) => s + Number(x.actual_hours), 0);
+  const etc = live.reduce((s, x) => s + Number(x.etc_hours), 0);
+  const weight = live.reduce((s, x) => s + Number(x.fee), 0);
+  const delivery = weight ? live.reduce((s, x) => s + Number(x.delivery_progress_pct) * Number(x.fee), 0) / weight : 0;
   const entitlement = await entitlementOf(tx, p.id);
   const labour = await labourOf(tx, p.id);
   const openingMissing = phases.some((x) => Number(x.opening_actual_hours) > 0) ? ['Imported opening hours have no stored cost'] : [];
@@ -88,17 +102,93 @@ export async function projectView(tx: Tx, p: any, actor: Actor) {
     entitlement,
     labour_cost: fenceAggregate(actor, labour.people, { value: money(labour.total), complete: missing.length === 0, missing }),
     contribution: { value: money(contributionValue), complete: missing.length === 0, missing, label: 'Management estimate' },
-    phases: phases.map((x) => ({
-      id: x.id, code: x.code, name: x.name, start_date: x.start_date, end_date: x.end_date, owner: x.owner_id ? { id: x.owner_id, ref_code: x.owner_ref, name: x.owner_name } : null,
-      budget_hours: hours(x.budget_hours), actual_hours: hours(x.actual_hours), etc_hours: hours(x.etc_hours), forecast_hours: hours(Number(x.actual_hours) + Number(x.etc_hours)),
-      delivery_progress_pct: Number(x.delivery_progress_pct), fee: money(x.fee), status: x.status,
-    })),
+    phases: phases.map(phaseView),
+    permissions: {
+      // An archived project's phases cannot change until it is restored (PUT /phases/:id, /progress and /dates are 409).
+      edit_phases: p.status !== 'Archived' && can(actor, 'projects.plan', { projectId: p.id }),
+      change_status: can(actor, 'projects.plan', { projectId: p.id }),
+      archive: can(actor, 'projects.create'),
+    },
   };
 }
 
 const BILLING_METHODS = ['fixed_milestone', 'fixed_percent', 'hourly', 'hourly_nte', 'percent_construction', 'consultant_recharge'];
 const FIXED = ['fixed_percent', 'fixed_milestone'];
 const bad = (field: string, code: string, message: string) => new ApiError(400, 'VALIDATION', message, [{ field, code }]);
+
+/**
+ * Hours for a phase budget or ETC: a number (or numeric string) from 0 to 100000. The columns are numeric(7,2), so the
+ * largest value they hold is 99999.99; anything above is a 400 naming the field, never a database error.
+ */
+const HOURS_MAX = 99_999.99;
+function hoursAmount(v: unknown, field: string, what: string): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) throw bad(field, 'number', `${what} must be a number.`);
+  if (n < 0 || n > 100_000 || n > HOURS_MAX) throw bad(field, 'range', `${what} must be from 0 to ${HOURS_MAX} h.`);
+  return n;
+}
+const unset = (v: unknown) => v === undefined || v === null || v === '';
+
+/** A phase owner: an active person in this studio (RLS hides other firms, so a foreign id reads as unknown). */
+async function assertActivePerson(tx: Tx, id: unknown, field: string) {
+  if (!isUuid(id) || !(await tx.query(`select 1 from person where id = $1 and employment_state = 'Active'`, [id])).rowCount) {
+    throw bad(field, 'unknown', 'Choose an active person from this studio.');
+  }
+}
+
+/** A trimmed reason of 1 to 500 characters, or null when none is given and none is needed. */
+function reasonOf(v: unknown, needed: boolean, what: string): string | null {
+  if (unset(v) && !needed) return null;
+  if (typeof v !== 'string' || !v.trim()) throw bad('reason', 'required', `Give a reason ${what}.`);
+  const r = v.trim();
+  if (r.length > 500) throw bad('reason', 'length', 'A reason is at most 500 characters.');
+  return r;
+}
+
+/** The phase's hours on the project's current approved budget version (null when it has none there). */
+async function currentBudgetVersion(tx: Tx, firmId: string, actor: Actor, projectId: string) {
+  const v = (await tx.query(`select id from budget_version where project_id = $1 and status = 'Approved' order by version_no desc limit 1`, [projectId])).rows[0];
+  if (v) return v.id as string;
+  // Every project gets a baseline at creation; this only covers one made without (none should exist).
+  const no = Number((await tx.query('select coalesce(max(version_no), 0) as n from budget_version where project_id = $1', [projectId])).rows[0].n) + 1;
+  return (await tx.query(
+    `insert into budget_version (firm_id, project_id, version_no, kind, created_by) values ($1,$2,$3,$4,$5) returning id`,
+    [firmId, projectId, no, no === 1 ? 'baseline' : 'revision', actor.id],
+  )).rows[0].id as string;
+}
+/** Sets (or with null removes) a phase's hours budget the way POST /projects stores it: one budget_line on the approved version. */
+async function setPhaseBudget(tx: Tx, firmId: string, actor: Actor, projectId: string, phaseId: string, value: number | null) {
+  const bv = await currentBudgetVersion(tx, firmId, actor, projectId);
+  if (value == null) {
+    await tx.query('delete from budget_line where budget_version_id = $1 and phase_id = $2', [bv, phaseId]);
+    return;
+  }
+  const r = await tx.query('update budget_line set hours = $3, updated_by = $4, updated_at = now() where budget_version_id = $1 and phase_id = $2', [bv, phaseId, value, actor.id]);
+  if (!r.rowCount) await tx.query(`insert into budget_line (firm_id, budget_version_id, phase_id, hours, created_by) values ($1,$2,$3,$4,$5)`, [firmId, bv, phaseId, value, actor.id]);
+}
+
+/** Per-phase setup fields on POST /projects: dates (both or neither, start <= end), an hours budget and an owner. */
+async function phaseSetup(tx: Tx, ph: any, i: number) {
+  const s = ph ?? {};
+  const start = unset(s.start_date) ? null : isoDate(s.start_date, `phases[${i}].start_date`);
+  const end = unset(s.end_date) ? null : isoDate(s.end_date, `phases[${i}].end_date`);
+  if ((start == null) !== (end == null)) throw bad(`phases[${i}].${start == null ? 'start_date' : 'end_date'}`, 'required', 'Give a phase both a start and an end date, or neither.');
+  if (start && end && start > end) throw bad(`phases[${i}].start_date`, 'order', 'The start date must be on or before the end date.');
+  const budget = unset(s.budget_hours) ? null : hoursAmount(s.budget_hours, `phases[${i}].budget_hours`, 'A phase hours budget');
+  const owner = unset(s.owner_id) ? null : (await assertActivePerson(tx, s.owner_id, `phases[${i}].owner_id`), s.owner_id as string);
+  return { start, end, budget, owner };
+}
+
+const STATUS_TARGETS = ['Active', 'On hold', 'Delivery complete', 'Archived'];
+/** What the team is told when a project changes status. */
+function statusText(actor: Actor, p: any, from: string, to: string, reason: string | null) {
+  const label = `${p.code} ${p.name}`;
+  if (to === 'On hold') return `${actor.name} put ${label} on hold: ${reason}`;
+  if (to === 'Archived') return `${actor.name} archived ${label}.`;
+  if (to === 'Delivery complete') return `${actor.name} marked ${label} delivery complete.`;
+  const verb = from === 'Archived' ? 'restored' : from === 'On hold' ? 'resumed' : from === 'Delivery complete' ? 'reopened' : 'activated';
+  return `${actor.name} ${verb} ${label}.`;
+}
 
 /**
  * Phase fees for a fixed fee. Each is a number of at least zero. A fixed fee needs the contracted fee (above zero) and
@@ -310,6 +400,9 @@ export function projectRoutes(api: Api) {
     }
     const principalId = body.principal_id ?? await defaultPrincipal(tx, actor, body.pm_id);
     await assertPeopleExist(tx, members.map((m) => m.person_id), 'members');
+    // Every phase's dates, hours budget and owner are checked before anything is written.
+    const setups: Awaited<ReturnType<typeof phaseSetup>>[] = [];
+    for (const [i, ph] of (body.phases as any[]).entries()) setups.push(await phaseSetup(tx, ph, i));
     const dup = await tx.query('select id from project where code = $1', [body.code]);
     if (dup.rowCount) throw conflict('DUPLICATE_CODE', `Project ${body.code} already exists.`, { conflicting_id: dup.rows[0].id });
     const p = (await tx.query(
@@ -329,31 +422,152 @@ export function projectRoutes(api: Api) {
     )).rows[0];
     const bv = (await tx.query(`insert into budget_version (firm_id, project_id, version_no, kind, created_by) values ($1,$2,1,'baseline',$3) returning id`, [firmId, p.id, actor.id])).rows[0];
     let order = 0;
-    for (const ph of body.phases) {
+    for (const [i, ph] of (body.phases as any[]).entries()) {
       required(ph, ['code', 'name']);
+      const set = setups[i]!;
       const row = (await tx.query(
-        `insert into phase (firm_id, project_id, code, name, start_date, end_date, sort_order, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
-        [firmId, p.id, ph.code, ph.name, ph.start_date ?? null, ph.end_date ?? null, order++, actor.id],
+        `insert into phase (firm_id, project_id, code, name, start_date, end_date, owner_id, sort_order, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        [firmId, p.id, ph.code, ph.name, set.start, set.end, set.owner, order++, actor.id],
       )).rows[0];
       await tx.query(`insert into phase_fee_allocation (firm_id, phase_id, fee_component_id, amount, created_by) values ($1,$2,$3,$4,$5)`, [firmId, row.id, fc.id, ph.fee ?? 0, actor.id]);
-      if (ph.budget_hours != null) await tx.query(`insert into budget_line (firm_id, budget_version_id, phase_id, hours, created_by) values ($1,$2,$3,$4,$5)`, [firmId, bv.id, row.id, ph.budget_hours, actor.id]);
+      if (set.budget != null) await tx.query(`insert into budget_line (firm_id, budget_version_id, phase_id, hours, created_by) values ($1,$2,$3,$4,$5)`, [firmId, bv.id, row.id, set.budget, actor.id]);
     }
     const audit_event_id = await audit(tx, actor, firmId, { recordType: 'project', recordId: p.id, action: 'create', next: { code: body.code, name: body.name, principal_id: principalId, members: members.length } });
     return { id: p.id, code: body.code, principal_id: principalId, audit_event_id };
   });
 
-  /** R8: delivery progress is entered by a PM. Logging hours never touches it. */
+  /**
+   * R8: delivery progress is entered by a PM. Logging hours never touches it. A new progress figure keeps the phase
+   * status in step: 100 completes a phase that is not Cancelled, above 0 starts a Not started one, and below 100
+   * reopens a Complete one (In progress). Saving the same figure again (say with a new ETC) leaves the status alone.
+   * The figure is rounded to two decimals (the column's scale) before it is compared or stored, so 99.996 is 100.
+   * An archived project must be restored first (409), as for PUT /phases/:id.
+   */
   put('/phases/:id/progress', async ({ tx, actor, firmId, params, body }) => {
     const id = uuidParam(params.id, 'Phase');
-    const ph = (await tx.query('select id, project_id, delivery_progress_pct, etc_hours from phase where id = $1', [id])).rows[0];
-    if (!ph) throw notFound('Phase');
-    authorize(actor, 'projects.plan', { projectId: ph.project_id });
-    const pct = body.delivery_progress_pct ?? ph.delivery_progress_pct;
-    const etc = body.etc_hours ?? ph.etc_hours;
-    if (Number(pct) < 0 || Number(pct) > 100) throw new ApiError(400, 'VALIDATION', 'Delivery progress must be 0 to 100.', [{ field: 'delivery_progress_pct', code: 'range' }]);
-    await tx.query('update phase set delivery_progress_pct = $2, etc_hours = $3, updated_by = $4, updated_at = now() where id = $1', [id, pct, etc, actor.id]);
-    const audit_event_id = await audit(tx, actor, firmId, { recordType: 'phase', recordId: id, action: 'update_progress', previous: { delivery_progress_pct: ph.delivery_progress_pct, etc_hours: ph.etc_hours }, next: { delivery_progress_pct: pct, etc_hours: etc } });
+    const found = (await tx.query('select project_id from phase where id = $1', [id])).rows[0];
+    if (!found) throw notFound('Phase');
+    authorize(actor, 'projects.plan', { projectId: found.project_id });
+    // Project first, then the phase: the same lock order as PUT /phases/:id and PUT /phases/:id/dates.
+    const project = (await tx.query('select status from project where id = $1 for update', [found.project_id])).rows[0];
+    if (project.status === 'Archived') throw conflict('PROJECT_CLOSED', 'Restore the project before changing it.');
+    const ph = (await tx.query('select id, project_id, delivery_progress_pct, etc_hours, status from phase where id = $1 for update', [id])).rows[0];
+    const raw = body.delivery_progress_pct ?? ph.delivery_progress_pct;
+    const etc = body.etc_hours == null ? ph.etc_hours : hoursAmount(body.etc_hours, 'etc_hours', 'ETC');
+    const rawN = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+    if (!Number.isFinite(rawN) || rawN < 0 || rawN > 100) throw new ApiError(400, 'VALIDATION', 'Delivery progress must be 0 to 100.', [{ field: 'delivery_progress_pct', code: 'range' }]);
+    const pctN = Math.round(rawN * 100) / 100;
+    // Without a new figure the stored one passes through as it is.
+    const pct = body.delivery_progress_pct == null ? ph.delivery_progress_pct : pctN;
+    let status = ph.status as string;
+    if (body.delivery_progress_pct != null && pctN !== Number(ph.delivery_progress_pct)) {
+      if (pctN === 100 && status !== 'Cancelled') status = 'Complete';
+      else if (status === 'Complete' && pctN < 100) status = 'In progress';
+      else if (status === 'Not started' && pctN > 0) status = 'In progress';
+    }
+    const changed = status !== ph.status;
+    if (changed) {
+      try { transition('phaseStatus', ph.status, status); } catch (e) { rethrowTransition(e); }
+    }
+    await tx.query('update phase set delivery_progress_pct = $2, etc_hours = $3, status = $5, updated_by = $4, updated_at = now() where id = $1', [id, pct, etc, actor.id, status]);
+    const audit_event_id = await audit(tx, actor, firmId, {
+      recordType: 'phase', recordId: id, action: 'update_progress',
+      previous: { delivery_progress_pct: ph.delivery_progress_pct, etc_hours: ph.etc_hours, ...(changed ? { status: ph.status } : {}) },
+      next: { delivery_progress_pct: pct, etc_hours: etc, ...(changed ? { status } : {}) },
+    });
     return { ok: true, audit_event_id };
+  });
+
+  /**
+   * Project status. Archiving, or restoring from Archived, needs projects.create firm-wide; every other move needs
+   * projects.plan for the project. On hold and Archived need a reason; On hold keeps it as hold_reason, and any other
+   * status clears hold_reason. The PM and the team (never the actor) are told once each.
+   */
+  put('/projects/:code/status', async ({ tx, actor, firmId, params, body }) => {
+    const p = await findProject(tx, params.code);
+    const cur = (await tx.query('select status, hold_reason from project where id = $1 for update', [p.id])).rows[0];
+    const to = body.status;
+    if (typeof to !== 'string' || !STATUS_TARGETS.includes(to)) throw bad('status', 'enum', `A project status is one of ${STATUS_TARGETS.join(', ')}.`);
+    if (to === 'Archived' || cur.status === 'Archived') authorize(actor, 'projects.create');
+    else authorize(actor, 'projects.plan', { projectId: p.id });
+    const reason = reasonOf(body.reason, to === 'On hold' || to === 'Archived', to === 'On hold' ? 'for the hold' : to === 'Archived' ? 'for archiving' : 'for the change');
+    try { transition('projectStatus', cur.status, to); } catch (e) { rethrowTransition(e); }
+    const hold = to === 'On hold' ? reason : null;
+    await tx.query('update project set status = $2, hold_reason = $3, updated_by = $4, updated_at = now() where id = $1', [p.id, to, hold, actor.id]);
+    const audit_event_id = await audit(tx, actor, firmId, {
+      recordType: 'project', recordId: p.id, action: 'change_status',
+      previous: { status: cur.status, hold_reason: cur.hold_reason }, next: { status: to, hold_reason: hold }, reason: reason ?? undefined,
+    });
+    const team = new Set<string>([p.pm_id, ...(await tx.query('select person_id from project_membership where project_id = $1', [p.id])).rows.map((r) => r.person_id as string)]);
+    team.delete(actor.id);
+    const text = statusText(actor, p, cur.status, to, reason);
+    for (const person of team) await notify(tx, firmId, person, 'project_status_changed', text, { type: 'project', id: p.id });
+    return { status: to, hold_reason: hold, audit_event_id };
+  });
+
+  /**
+   * Edits a phase after creation, any subset of: status (phaseStatus machine; Complete also sets delivery to 100),
+   * owner_id (an active person, or null), budget_hours (the phase's line on the current approved budget version, null
+   * removes it) and name. Same gate as PUT /phases/:id/dates. An archived project must be restored first (409).
+   * One audit row lists only what changed. Returns the phase as GET /projects/:code shows it.
+   */
+  put('/phases/:id', async ({ tx, actor, firmId, params, body }) => {
+    const id = uuidParam(params.id, 'Phase');
+    const found = (await tx.query('select project_id from phase where id = $1', [id])).rows[0];
+    if (!found) throw notFound('Phase');
+    assertProjectVisible(actor, found.project_id);
+    authorize(actor, 'projects.plan', { projectId: found.project_id });
+    // Project first, then the phase: the same lock order as PUT /phases/:id/dates, so the two never deadlock.
+    const project = (await tx.query('select status from project where id = $1 for update', [found.project_id])).rows[0];
+    if (project.status === 'Archived') throw conflict('PROJECT_CLOSED', 'Restore the project before changing it.');
+    const ph = (await tx.query('select id, project_id, name, status, owner_id, delivery_progress_pct from phase where id = $1 for update', [id])).rows[0];
+
+    let status: string | null = null;
+    if (body.status !== undefined) {
+      if (typeof body.status !== 'string' || !(PHASE_STATUSES as readonly string[]).includes(body.status)) throw bad('status', 'enum', `A phase status is one of ${PHASE_STATUSES.join(', ')}.`);
+      try { status = transition('phaseStatus', ph.status, body.status); } catch (e) { rethrowTransition(e); }
+    }
+    let owner: string | null | undefined;
+    if (body.owner_id !== undefined) {
+      owner = unset(body.owner_id) ? null : (body.owner_id as string);
+      if (owner != null) await assertActivePerson(tx, owner, 'owner_id');
+    }
+    const budget = body.budget_hours === undefined ? undefined : unset(body.budget_hours) ? null : hoursAmount(body.budget_hours, 'budget_hours', 'The hours budget');
+    let name: string | undefined;
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) throw bad('name', 'required', 'A phase needs a name.');
+      const trimmed = (body.name as string).trim();
+      if (trimmed.length > 120) throw bad('name', 'length', 'A phase name is at most 120 characters.');
+      name = trimmed;
+    }
+    const reason = reasonOf(body.reason, false, 'for the change');
+
+    const previous: Record<string, unknown> = {};
+    const next: Record<string, unknown> = {};
+    const change = (field: string, from: unknown, to: unknown) => { previous[field] = from; next[field] = to; };
+    if (status) {
+      change('status', ph.status, status);
+      if (status === 'Complete' && Number(ph.delivery_progress_pct) !== 100) change('delivery_progress_pct', Number(ph.delivery_progress_pct), 100);
+      await tx.query(`update phase set status = $2, delivery_progress_pct = case when $2 = 'Complete' then 100 else delivery_progress_pct end, updated_by = $3, updated_at = now() where id = $1`, [id, status, actor.id]);
+    }
+    if (owner !== undefined && owner !== ph.owner_id) {
+      change('owner_id', ph.owner_id, owner);
+      await tx.query('update phase set owner_id = $2, updated_by = $3, updated_at = now() where id = $1', [id, owner, actor.id]);
+    }
+    if (name !== undefined && name !== ph.name) {
+      change('name', ph.name, name);
+      await tx.query('update phase set name = $2, updated_by = $3, updated_at = now() where id = $1', [id, name, actor.id]);
+    }
+    if (budget !== undefined) {
+      const before = phaseView((await phasesOf(tx, ph.project_id)).find((x) => x.id === id)).budget_hours;
+      const after = budget == null ? null : hours(budget);
+      if (before !== after) {
+        change('budget_hours', before, after);
+        await setPhaseBudget(tx, firmId, actor, ph.project_id, id, budget);
+      }
+    }
+    if (Object.keys(next).length) await audit(tx, actor, firmId, { recordType: 'phase', recordId: id, action: 'update', previous, next, reason: reason ?? undefined });
+    return phaseView((await phasesOf(tx, ph.project_id)).find((x) => x.id === id));
   });
 
   get('/projects/:code/time', async ({ tx, actor, params, req }) => {

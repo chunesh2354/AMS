@@ -218,3 +218,52 @@ describe('project timeline in live mode', () => {
     expect(within(table).queryByText(/Waiting on/)).toBeNull();
   });
 });
+
+describe('project timeline, a phase with no dates', () => {
+  const undated = () => {
+    const s = SCHEDULE();
+    s.phases[1] = { ...s.phases[1], start_date: null, end_date: null, forecast_end: null } as unknown as typeof s.phases[1];
+    s.tasks = s.tasks.filter((t) => t.phase_id !== 'ph-tn');
+    return s;
+  };
+
+  it('shows No dates with a Set dates button that saves through PUT /phases/:id/dates, then reloads', async () => {
+    schedule = undated();
+    const user = userEvent.setup();
+    open();
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('No dates')).toBeInTheDocument();
+    await user.click(within(table).getByRole('button', { name: 'Set dates for Tender' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Set phase dates' });
+    await user.click(within(sheet).getByRole('button', { name: 'Save dates' }));
+    expect(within(sheet).getByText('Pick a start and an end')).toBeInTheDocument();
+    expect(puts).toEqual([]);
+    await user.click(within(sheet).getByRole('button', { name: /Start/ }));
+    await user.click(await screen.findByRole('button', { name: /^26 Nov 2026/ }));
+    await user.click(within(sheet).getByRole('button', { name: /End/ }));
+    await user.click(await screen.findByRole('button', { name: /^30 Nov 2026/ }));
+    const before = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/projects/LV-77/schedule')).length;
+    await user.click(within(sheet).getByRole('button', { name: 'Save dates' }));
+    await waitFor(() => expect(puts).toEqual([{ url: '/api/v1/phases/ph-tn/dates', body: { start_date: '2026-11-26', end_date: '2026-11-30', cascade: false } }]));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/projects/LV-77/schedule')).length).toBe(before + 1));
+  });
+
+  it('offers no Set dates to a viewer who cannot reschedule', async () => {
+    schedule = { ...undated(), can_reschedule: false };
+    open();
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('No dates')).toBeInTheDocument();
+    expect(within(table).queryByRole('button', { name: /Set dates/ })).toBeNull();
+  });
+
+  it('an archived project (the server sends can_reschedule false) offers no Set dates, no dragging, and says to restore it', async () => {
+    const s = undated();
+    schedule = { ...s, can_reschedule: false, project: { ...s.project, status: 'Archived' } };
+    open();
+    const table = await screen.findByRole('table');
+    expect(within(table).queryByRole('button', { name: /Set dates/ })).toBeNull();
+    expect(screen.queryAllByRole('button', { name: /Select to move/ })).toEqual([]);
+    expect(screen.getByText('This project is archived. Restore it to change its dates.')).toBeInTheDocument();
+    expect(screen.queryByText(/Only the project’s PM/)).toBeNull();
+  });
+});

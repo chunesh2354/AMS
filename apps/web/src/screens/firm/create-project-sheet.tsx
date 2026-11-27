@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { ApiFailure, failureMessage, isLive } from '../../api/live';
 import { createClient, createWizardProject, listClients, listProjectCandidates, splitFee, whoAmI, type CandidatePerson, type Client, type FeeBasis, type WizardProject } from '../../api/live/setup';
 import type { Person, Proposal } from '../../api';
+import { HOURS_RANGE_ERROR, MAX_HOURS } from '../../api/live/projects';
 import { SETTINGS_LISTS } from '../../mock/studio-meridian';
 import { AvatarGroup } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
+import { DateField } from '../../ui/DateField';
 import { Form, FormSection } from '../../ui/Form';
 import { InlineAlert } from '../../ui/InlineAlert';
 import { MoneyField } from '../../ui/MoneyField';
 import { MultiSelect } from '../../ui/MultiSelect';
+import { NumberField } from '../../ui/NumberField';
 import { PercentField } from '../../ui/PercentField';
 import { PersonPicker } from '../../ui/PersonPicker';
 import { Select } from '../../ui/Select';
@@ -151,7 +154,19 @@ type LiveDraft = {
   /** Phase fees by phase code, once the user edits one. Until then the fee is split evenly. */
   phaseFees: Record<string, number | null> | null;
   principal: string | null; team: string[];
+  /** Optional dates and hours budget by phase code, once the user edits one. Until then: the proposal's, or none. */
+  schedule: Record<string, PhaseSchedule> | null;
 };
+
+type PhaseSchedule = { start: string | null; end: string | null; hours: string };
+
+/** One phase's dates and hours: both dates or neither, the start on or before the end, hours from 0. */
+function scheduleError(s: PhaseSchedule): string | undefined {
+  if (!!s.start !== !!s.end) return 'Set both dates, or clear both';
+  if (s.start && s.end && s.start > s.end) return 'The end is before the start';
+  if (s.hours.trim() !== '' && !(Number(s.hours) >= 0 && Number(s.hours) <= MAX_HOURS)) return HOURS_RANGE_ERROR;
+  return undefined;
+}
 
 const paise = (v: number) => Math.round(v * 100);
 
@@ -162,7 +177,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
   const blank = (): LiveDraft => ({
     code: '', name: proposal?.name ?? '', client: null, newClient: proposal?.client ?? '', pm: null, template: null,
     basis: 'fixed_percent', fee: proposal ? proposal.fees.reduce((s, f) => s + f.amount, 0) : null, feePercent: '', cap: null, phaseFees: null,
-    principal: null, team: [],
+    principal: null, team: [], schedule: null,
   });
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<LiveDraft>(blank);
@@ -203,9 +218,19 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
   const setPm = (id: string | null) => setForm((f) => ({ ...f, pm: id, principal: f.principal && f.principal === id ? null : f.principal }));
   const addingClient = form.client === NEW_CLIENT;
   const template = LIVE_TEMPLATES.find((t) => t.name === form.template) ?? null;
-  const phaseList: { code: string; name: string; budget_hours?: number }[] = proposal
-    ? phaseCodes(proposal.phases.map((p) => p.name)).map((code, i) => ({ code, name: proposal.phases[i]?.name ?? code, budget_hours: proposal.phases[i]?.hours }))
+  const phaseList: { code: string; name: string; start?: string; end?: string; budget_hours?: number }[] = proposal
+    ? phaseCodes(proposal.phases.map((p) => p.name)).map((code, i) => ({
+      code, name: proposal.phases[i]?.name ?? code, start: proposal.phases[i]?.start, end: proposal.phases[i]?.end, budget_hours: proposal.phases[i]?.hours,
+    }))
     : (template?.phases ?? []).map(([code, name]) => ({ code, name }));
+  const scheduleOf = (code: string): PhaseSchedule => {
+    if (form.schedule?.[code]) return form.schedule[code];
+    const p = phaseList.find((x) => x.code === code);
+    return { start: p?.start ?? null, end: p?.end ?? null, hours: p?.budget_hours != null ? String(p.budget_hours) : '' };
+  };
+  const editSchedule = (code: string, patch: Partial<PhaseSchedule>) =>
+    setForm((f) => ({ ...f, schedule: { ...(f.schedule ?? {}), [code]: { ...scheduleOf(code), ...patch } } }));
+  const scheduleProblem = phaseList.map((p) => ({ p, e: scheduleError(scheduleOf(p.code)) })).find((x) => x.e);
   const fixed = form.basis === 'fixed_percent';
   const even = form.fee != null ? splitFee(form.fee, phaseList.length) : [];
   const phaseFee = (code: string, i: number): number | null => (form.phaseFees ? form.phaseFees[code] ?? null : even[i] ?? null);
@@ -231,6 +256,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
           : undefined,
         cap: form.basis === 'hourly_nte' && !(form.cap != null && form.cap > 0) ? 'Enter the cap' : undefined,
         feePercent: form.basis === 'percent_construction' && pct != null && !(pct > 0 && pct <= 100) ? 'Enter a percent above 0 and at most 100' : undefined,
+        schedule: scheduleProblem ? `${scheduleProblem.p.name}: ${scheduleProblem.e}` : undefined,
       }
       : {};
   const invalid = Object.values(errors).some(Boolean);
@@ -245,7 +271,7 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
   });
   const pickTemplate = (v: string) => {
     const t = LIVE_TEMPLATES.find((x) => x.name === v);
-    setForm((f) => ({ ...f, template: v, basis: t?.method ?? f.basis, phaseFees: null }));
+    setForm((f) => ({ ...f, template: v, basis: t?.method ?? f.basis, phaseFees: null, schedule: null }));
   };
 
   const body = (clientId: string): WizardProject => ({
@@ -254,10 +280,15 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
     ...(fixed && form.fee != null ? { contracted_amount: form.fee } : {}),
     ...(form.basis === 'percent_construction' && pct != null ? { fee_percent: pct } : {}),
     ...(form.basis === 'hourly_nte' && form.cap != null ? { cap_amount: form.cap } : {}),
-    phases: phaseList.map((p, i) => ({
-      code: p.code, name: p.name, ...(p.budget_hours != null ? { budget_hours: p.budget_hours } : {}),
-      ...(fixed && form.fee != null ? { fee: phaseFee(p.code, i) ?? 0 } : {}),
-    })),
+    phases: phaseList.map((p, i) => {
+      const s = scheduleOf(p.code);
+      return {
+        code: p.code, name: p.name,
+        ...(s.start && s.end ? { start_date: s.start, end_date: s.end } : {}),
+        ...(s.hours.trim() !== '' ? { budget_hours: Number(s.hours) } : {}),
+        ...(fixed && form.fee != null ? { fee: phaseFee(p.code, i) ?? 0 } : {}),
+      };
+    }),
     members: form.team.filter((id) => id !== form.pm).map((id) => ({ person_id: id, role: 'contributor' as const })),
   });
 
@@ -355,6 +386,26 @@ function LiveCreateProjectSheet({ open, onClose, proposal }: { open: boolean; on
                 </FormSection>
               )
               : <ul className="link-list">{phaseList.map((p) => <li key={p.code}><span>{p.name}</span><span className="t-numeric">{p.code}</span></li>)}</ul>)}
+            {phaseList.length > 0 && (
+              <FormSection title="Dates and hours">
+                <p className="t-caption ink-2">Optional. Hours from 0 to {MAX_HOURS} per phase. Phases without dates can get them later on the Phases or Timeline tab.</p>
+                {phaseList.map((p) => {
+                  const s = scheduleOf(p.code);
+                  return (
+                    <div key={p.code} role="group" aria-label={`${p.name} dates and hours`} className="stack-rows" style={{ gap: 'var(--s-1)' }}>
+                      <span className="t-body-sm">{p.name}</span>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 96px', gap: 'var(--s-2)', alignItems: 'end' }}>
+                        <DateField dense label="Start" placeholder="Not set" value={s.start} onChange={(v) => editSchedule(p.code, { start: v })} />
+                        <DateField dense label="End" placeholder="Not set" value={s.end} min={s.start ?? undefined} onChange={(v) => editSchedule(p.code, { end: v })} />
+                        <NumberField dense label="Hours" value={s.hours} placeholder="None" onChange={(e) => editSchedule(p.code, { hours: e.target.value })} />
+                      </div>
+                      {(s.start || s.end) && <div><Button variant="ghost" size="dense" onClick={() => editSchedule(p.code, { start: null, end: null })}>Clear dates</Button></div>}
+                    </div>
+                  );
+                })}
+                {err('schedule') && <p className="field__error" role="alert">{err('schedule')}</p>}
+              </FormSection>
+            )}
           </>
         )}
         {step === 2 && (

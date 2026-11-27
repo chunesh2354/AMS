@@ -14,6 +14,7 @@ import { InlineAlert } from '../../../ui/InlineAlert';
 import { Segmented } from '../../../ui/Segmented';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Toggle } from '../../../ui/Toggle';
+import { PhaseDatesSheet } from './phase-sheets';
 import {
   Gantt, GanttChip, GanttLegend, GanttSelection, addDays, daysBetween, dayMonth, dayWord, earliestStart, moveWords, rangeText, shortRange, windowFor,
   type GanttLink, type GanttRow, type Range, type Zoom,
@@ -62,6 +63,8 @@ function TimelineView({ schedule, reload }: { schedule: ProjectSchedule; reload:
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [result, setResult] = useState<{ moved: MovedItem[]; violations: Violation[] } | null>(null);
+  /** The undated phase whose "Set dates" sheet is open. */
+  const [dating, setDating] = useState<{ id: string; name: string; start: string | null; end: string | null } | null>(null);
 
   const items = useMemo(() => {
     const m = new Map<string, Item>();
@@ -150,6 +153,10 @@ function TimelineView({ schedule, reload }: { schedule: ProjectSchedule; reload:
       forecast: showForecast && c.start && p.forecast_end && !drafts[key] ? { start: c.start, end: p.forecast_end } : null,
       progress: done ? 100 : p.progress_pct, late: over || slip,
       editable: c.start && c.end ? editPhase : null,
+      // A phase with no dates has no bar to drag: it gets a button that opens the dates sheet instead.
+      action: canEdit && isLive && !(c.start && c.end)
+        ? <Button variant="secondary" size="dense" onClick={() => setDating({ id: p.id, name: p.name, start: c.start, end: c.end })} aria-label={`Set dates for ${p.name}`}>Set dates</Button>
+        : undefined,
       expand: { open: isOpen, onToggle: () => setOpen((o) => ({ ...o, [p.id]: !isOpen })) },
       describe: `${p.name}, phase${p.owner ? `, ${p.owner.name}` : ''}, ${rangeText(c.start, c.end)}, ${done ? 'done' : `${p.progress_pct}% done`}${caption ? `, ${caption.text}` : ''}`,
     });
@@ -273,7 +280,13 @@ function TimelineView({ schedule, reload }: { schedule: ProjectSchedule; reload:
         {canEdit && selRow && <GanttSelection row={selRow} onEdit={edit} note={selRow.kind === 'group' && cascade ? 'Moving a phase moves its open tasks too when you save.' : undefined} />}
       </div>
 
-      {!canEdit && <p className="gantt-note">You can see this timeline. Only the project’s PM, a project lead or the principal can change its dates.</p>}
+      {!canEdit && (
+        <p className="gantt-note">
+          {schedule.project.status === 'Archived'
+            ? 'This project is archived. Restore it to change its dates.'
+            : 'You can see this timeline. Only the project’s PM, a project lead or the principal can change its dates.'}
+        </p>
+      )}
 
       {pending.length > 0 && (
         <div className="gantt-chg" role="region" aria-label="Unsaved changes">
@@ -313,6 +326,7 @@ function TimelineView({ schedule, reload }: { schedule: ProjectSchedule; reload:
         selectedId={selected} onSelect={canEdit ? setSelected : undefined} onEdit={canEdit ? edit : undefined}
         empty="This project has no phases or tasks with dates yet."
       />
+      <PhaseDatesSheet phase={dating} today={today} onClose={() => setDating(null)} onSaved={reload} />
       <div className="stack-rows" style={{ gap: 'var(--s-2)' }}>
         <p className="gantt-note">Bars show the planned dates. A thin line under a bar is the forecast when it differs. A line joins a task to the one that can only start once it finishes; it turns red when that order is broken or the first task is past due.</p>
         <p className="gantt-note">{lateCount === 1 ? '1 task past due' : `${lateCount} tasks past due`} and {waiting} waiting on them.{schedule.slip_driver && (schedule.slip_days ?? 0) > 0 ? ` Forecast to finish ${dayWord(schedule.slip_days!)} late (${schedule.slip_driver.name}).` : ''}</p>

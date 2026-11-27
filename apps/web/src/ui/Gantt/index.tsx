@@ -46,6 +46,8 @@ export type GanttRow = {
   /** What the viewer may change. Null or absent: read-only. A task with a due date only can move but not resize. */
   editable?: { move: boolean; start: boolean; end: boolean } | null;
   expand?: { open: boolean; onToggle: () => void };
+  /** A control drawn in the track when the row has no bar, such as "Set dates" on a phase with no dates. */
+  action?: ReactNode;
   /** The accessible description of the bar: name, dates and state. */
   describe: string;
 };
@@ -254,6 +256,7 @@ export function Gantt({ label, rows, links = [], zoom, window: w, today, columns
                   ) : (
                     <span className={barCls} style={{ left: `${box.left}%`, width: `${box.width}%` }} role="img" aria-label={r.describe} title={r.describe}>{fill}</span>
                   ))}
+                  {!box && r.action && <span className="gchart__act">{r.action}</span>}
                   {r.outlines?.map((o) => {
                     const b = barBox(w, o.start, o.end);
                     return b && (

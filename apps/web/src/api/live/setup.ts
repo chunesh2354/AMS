@@ -32,7 +32,8 @@ export const createRate = (body: NewRate) => apiFetch<{ id: string; audit_event_
 
 export type FeeBasis = 'fixed_percent' | 'percent_construction' | 'hourly' | 'hourly_nte';
 export type ProjectRole = 'lead' | 'contributor' | 'reviewer' | 'viewer';
-export type WizardPhase = { code: string; name: string; fee?: number; budget_hours?: number };
+/** Dates are both or neither (ISO, start on or before end); each optional key is left out when unset. */
+export type WizardPhase = { code: string; name: string; fee?: number; budget_hours?: number; start_date?: string; end_date?: string };
 /** Everything the wizard sends: phase fees for a fixed fee, the team, and the principal a PM's own time goes to. */
 export type WizardProject = {
   code: string; name: string; client_id: string; pm_id: string; principal_id?: string; billing_method: FeeBasis;

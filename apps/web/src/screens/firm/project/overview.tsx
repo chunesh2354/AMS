@@ -8,6 +8,7 @@ import { useSession } from '../../../app/session';
 import { todayIn } from '../../../api/live/time';
 import { WorkspaceColumns } from '../../../layouts/WorkspaceColumns';
 import { AttentionList } from '../../../ui/AttentionList';
+import { Avatar } from '../../../ui/Avatar';
 import { BudgetBar } from '../../../ui/BudgetBar';
 import { DataTable, type Column } from '../../../ui/DataTable';
 import { EntitlementBar } from '../../../ui/EntitlementBar';
@@ -104,15 +105,31 @@ function LiveProjectOverview() {
     return <div className="grid-12">{Array.from({ length: 3 }, (_, i) => <div key={i} className="span-4"><Skeleton kind="card" /></div>)}</div>;
   }
   const n = (v: number) => (Number.isFinite(v) ? v : 0);
+  /** A live phase with no hours budget (the server sends null). */
+  const noBudget = (x: Phase) => p.phases.find((y) => y.id === x.id)?.budgetHours === null;
   const columns: Column<Phase>[] = [
     { key: 'name', header: 'Phase', value: (x) => x.name },
-    { key: 'owner', header: 'Owner', type: 'person', value: (x) => nameOf(p.people, x.ownerId), hiddenByDefault: true },
-    { key: 'budget', header: 'Budget (h)', type: 'number', value: (x) => x.budget, total: (r) => r.reduce((s, x) => s + n(x.budget), 0) },
+    {
+      // No owner reads as text, never an avatar of the word (as on the Phases tab).
+      key: 'owner', header: 'Owner', type: 'person', value: (x) => (x.ownerId ? nameOf(p.people, x.ownerId) : 'No owner'), hiddenByDefault: true,
+      render: (x) => (x.ownerId
+        ? <span className="dt__person"><Avatar name={nameOf(p.people, x.ownerId)} size={20} />{nameOf(p.people, x.ownerId)}</span>
+        : <span className="ink-2">No owner</span>),
+    },
+    {
+      key: 'budget', header: 'Budget (h)', type: 'number', value: (x) => x.budget, total: (r) => r.reduce((s, x) => s + n(x.budget), 0),
+      render: (x) => (noBudget(x) ? <span className="ink-2">Not set</span> : formatGrouped(x.budget)),
+    },
     { key: 'actual', header: 'Actual (h)', type: 'number', value: (x) => x.actual, total: (r) => r.reduce((s, x) => s + n(x.actual), 0) },
     { key: 'forecast', header: 'Forecast (h)', type: 'number', value: (x) => x.actual + x.etc, total: (r) => r.reduce((s, x) => s + n(x.actual) + n(x.etc), 0) },
     {
       key: 'variance', header: 'Over / under (h)', type: 'number', value: (x) => x.actual + x.etc - x.budget,
-      render: (x) => { const v = x.actual + x.etc - x.budget; return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{v > 0 ? `+${v}` : v < 0 ? `−${-v}` : v}</span>; },
+      render: (x) => {
+        // A phase with no hours budget is not over it.
+        if (noBudget(x)) return <span className="ink-2">No budget</span>;
+        const v = x.actual + x.etc - x.budget;
+        return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{v > 0 ? `+${v}` : v < 0 ? `−${-v}` : v}</span>;
+      },
     },
     { key: 'status', header: 'Status', type: 'status', value: (x) => x.status },
   ];

@@ -10,8 +10,9 @@ import { Skeleton } from '../../../ui/Skeleton';
 import { Gantt, GanttChip, GanttLegend, dayMonth, dayWord, monthYear, rangeText, shortRange, windowFor, addDays, type GanttRow, type Zoom } from '../../../ui/Gantt';
 
 const ZOOMS: { value: Zoom; label: string }[] = [{ value: 'month', label: 'Month' }, { value: 'quarter', label: 'Quarter' }, { value: 'year', label: 'Year' }];
-type StatusFilter = 'all' | 'active' | 'hold';
-const STATUS_PARAM: Record<StatusFilter, string[] | undefined> = { all: undefined, active: ['Active'], hold: ['On hold'] };
+type StatusFilter = 'all' | 'active' | 'hold' | 'done';
+const STATUS_PARAM: Record<StatusFilter, string[] | undefined> = { all: undefined, active: ['Active'], hold: ['On hold'], done: ['Delivery complete'] };
+const STATUS_LABEL: Record<StatusFilter, string> = { all: 'All', active: 'Active', hold: 'On hold', done: 'Delivery complete' };
 /** A billing milestone past Planned has been signed off (authorized, then drafted and invoiced). */
 const reached = (status: string) => status !== 'Planned';
 const closed = (status: string) => status === 'Complete' || status === 'Cancelled';
@@ -117,7 +118,7 @@ export function StudioTimelineView() {
           </div>
           <div className="gantt-filt" role="group" aria-label="Filter by status">
             <span className="gantt-filt__l">Status</span>
-            {(['all', 'active', 'hold'] as const).map((k) => <GanttChip key={k} pressed={status === k} onClick={() => setStatus(k)}>{k === 'all' ? 'All' : k === 'active' ? 'Active' : 'On hold'}</GanttChip>)}
+            {(Object.keys(STATUS_LABEL) as StatusFilter[]).map((k) => <GanttChip key={k} pressed={status === k} onClick={() => setStatus(k)}>{STATUS_LABEL[k]}</GanttChip>)}
           </div>
         </div>
       </div>

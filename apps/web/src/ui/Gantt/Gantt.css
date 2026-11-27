@@ -43,6 +43,7 @@ a.gchart__n { text-decoration: underline; text-underline-offset: 3px; }
 .gchart__tg.is-open svg { transform: rotate(90deg); }
 .gchart__tgsp { width: 32px; flex: none; }
 .gchart__track { position: relative; border-left: 1px solid var(--line); }
+.gchart__act { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 1; }
 
 .gb { position: absolute; top: 17px; height: 14px; min-width: 3px; padding: 0; border: 1px solid var(--rule); border-radius: 0; background: var(--surface); touch-action: none; }
 button.gb { cursor: grab; }

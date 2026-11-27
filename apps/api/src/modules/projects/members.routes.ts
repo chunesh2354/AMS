@@ -28,9 +28,13 @@ const roleOf = (body: any): MemberRole => {
 
 async function membersOf(tx: Tx, projectId: string) {
   return (await tx.query(
-    `select m.person_id, m.project_role, p.ref_code, p.name, p.job_title from project_membership m join person p on p.id = m.person_id
+    `select m.person_id, m.project_role, p.ref_code, p.name, p.job_title, p.employment_state from project_membership m join person p on p.id = m.person_id
      where m.project_id = $1 order by case m.project_role when 'pm' then 0 when 'lead' then 1 else 2 end, p.ref_code`, [projectId],
-  )).rows.map((r) => ({ person: { id: r.person_id, ref_code: r.ref_code, name: r.name, job_title: r.job_title }, role: r.project_role, is_pm: r.project_role === 'pm' }));
+  )).rows.map((r) => ({
+    // employment_state lets a picker offer only people who can still hold a role (a phase owner must be Active).
+    person: { id: r.person_id, ref_code: r.ref_code, name: r.name, job_title: r.job_title, employment_state: r.employment_state },
+    role: r.project_role, is_pm: r.project_role === 'pm',
+  }));
 }
 
 /** The project team: membership is what lets staff see a project and log time on it (AC-F06-4). */

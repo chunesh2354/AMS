@@ -139,3 +139,72 @@ describe('Create project sheet, live mode', () => {
     expect(within(sheet).getByLabelText('Project code')).toBeInTheDocument();
   });
 });
+
+describe('Create project sheet, live mode: phase dates and hours', () => {
+  const day = async (sheet: HTMLElement, group: string, field: 'Start' | 'End', which: 'first' | 'last') => {
+    await userEvent.click(within(within(sheet).getByRole('group', { name: group })).getByRole('button', { name: field }));
+    const cal = await screen.findByRole('dialog', { name: `${field} calendar` });
+    const days = [...cal.querySelectorAll<HTMLButtonElement>('.calendar__day:not(.calendar__day--other):not(:disabled)')];
+    await userEvent.click(which === 'first' ? days[0] : days[days.length - 1]);
+  };
+
+  it('sends optional dates and an hours budget per phase from a template, and leaves unset keys out', async () => {
+    handler = withDirectory((url, init) => (url.endsWith('/projects') && init.method === 'POST' ? { status: 200, body: { id: 'p-new', code: 'PRJ-07', audit_event_id: 'e2' } } : undefined));
+    const sheet = await openSheet();
+    await fillProjectStep(sheet, { client: 'Lakeview Trust' });
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '600000');
+    const cd = 'Concept design dates and hours';
+    await day(sheet, cd, 'Start', 'first');
+    // One date alone is refused.
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    expect(within(sheet).getByText('Concept design: Set both dates, or clear both')).toBeInTheDocument();
+    await day(sheet, cd, 'End', 'last');
+    await userEvent.type(within(within(sheet).getByRole('group', { name: cd })).getByLabelText('Hours'), '120');
+    await userEvent.type(within(within(sheet).getByRole('group', { name: 'Site supervision dates and hours' })).getByLabelText('Hours'), '0');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
+    expect(await screen.findByRole('heading', { name: 'Opened PRJ-07' })).toBeInTheDocument();
+    const phases = bodyOf(posts('/projects')[0]![1] as RequestInit).phases as Record<string, unknown>[];
+    expect(phases[0]).toMatchObject({ code: 'CD', budget_hours: 120 });
+    expect(String(phases[0].start_date)).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(String(phases[0].end_date) > String(phases[0].start_date)).toBe(true);
+    expect(phases[3]).toMatchObject({ code: 'SS', budget_hours: 0 });
+    for (const p of phases.slice(1)) expect(p).not.toHaveProperty('start_date');
+    expect(phases[1]).not.toHaveProperty('budget_hours');
+  });
+
+  it('takes hours up to 99999.99 (the server limit) and refuses more', async () => {
+    handler = withDirectory((url, init) => (url.endsWith('/projects') && init.method === 'POST' ? { status: 200, body: { id: 'p-new', code: 'PRJ-07', audit_event_id: 'e2' } } : undefined));
+    const sheet = await openSheet();
+    await fillProjectStep(sheet, { client: 'Lakeview Trust' });
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    await userEvent.type(within(sheet).getByLabelText('Contracted fee'), '600000');
+    expect(within(sheet).getByText(/Hours from 0 to 99999\.99 per phase/)).toBeInTheDocument();
+    const hours = within(within(sheet).getByRole('group', { name: 'Concept design dates and hours' })).getByLabelText('Hours');
+    await userEvent.type(hours, '100000');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    expect(within(sheet).getByText('Concept design: Enter hours from 0 to 99999.99')).toBeInTheDocument();
+    await userEvent.clear(hours);
+    await userEvent.type(hours, '99999.99');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Create project' }));
+    expect(await screen.findByRole('heading', { name: 'Opened PRJ-07' })).toBeInTheDocument();
+    const phases = bodyOf(posts('/projects')[0]![1] as RequestInit).phases as Record<string, unknown>[];
+    expect(phases[0]).toMatchObject({ code: 'CD', budget_hours: 99999.99 });
+  });
+
+  it('clears a phase’s dates again', async () => {
+    handler = withDirectory(() => undefined);
+    const sheet = await openSheet();
+    await fillProjectStep(sheet, { client: 'Lakeview Trust' });
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save and continue' }));
+    await pick(sheet, 'Phase template', 'Refit, 4 phases');
+    const cd = within(sheet).getByRole('group', { name: 'Concept design dates and hours' });
+    await day(sheet, 'Concept design dates and hours', 'Start', 'first');
+    await userEvent.click(within(cd).getByRole('button', { name: 'Clear dates' }));
+    expect(within(cd).getAllByText('Not set')).toHaveLength(2);
+  });
+});

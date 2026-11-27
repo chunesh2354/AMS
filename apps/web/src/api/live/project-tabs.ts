@@ -6,7 +6,7 @@
 import { ApiFailure, apiFetch, hoursOf, type ListResponse, type LiveMoney, type Restricted } from '../live';
 import type { TimeRow } from '../types';
 import { liveDrafts, liveReady, mapException, mapReadyItem, type LiveReadyResponse } from './billing';
-import { mapProject, type ApiProject, type LiveProjectView } from './projects';
+import { mapProject, type ApiPhase, type ApiProject, type LiveProjectView, type PhaseStatus } from './projects';
 
 type Ref = { id: string; ref_code: string; name: string };
 type Hours = string | number;
@@ -36,12 +36,22 @@ export async function getProjectTab(code: string): Promise<ProjectTabView | null
   }
 }
 
-/** PUT /phases/:id/progress. Delivery progress and ETC are the only phase fields the API lets a PM change. */
+/**
+ * The three phase writes: updatePhase (status, owner, hours budget, name), putPhaseDates in schedule.ts (dates),
+ * and savePhaseProgress (ETC and delivery). PUT /phases/:id/progress keeps the status in step on the server.
+ */
 export const savePhaseProgress = (phaseId: string, input: { etc: number; delivery: number }) =>
   apiFetch<{ ok: boolean; audit_event_id: string }>(`/phases/${encodeURIComponent(phaseId)}/progress`, {
     method: 'PUT',
     body: { etc_hours: input.etc, delivery_progress_pct: input.delivery },
   });
+
+/** Any subset of these; only what changed is sent. owner_id is a person's uuid, null clears it. budget_hours null removes the budget. */
+export type PhasePatch = { status?: PhaseStatus; owner_id?: string | null; budget_hours?: number | null; name?: string; reason?: string };
+
+/** PUT /phases/:id: returns the phase as GET /projects/:code shows it (screens reload the project after a save). */
+export const updatePhase = (phaseId: string, patch: PhasePatch) =>
+  apiFetch<ApiPhase>(`/phases/${encodeURIComponent(phaseId)}`, { method: 'PUT', body: patch });
 
 export type ApiProjectTimeRow = {
   person: Ref; phase: { id: string; name: string };
@@ -84,7 +94,10 @@ export async function getProjectBillingReadyLive(code: string) {
 
 // ---------- Team (Staffing tab) ----------
 
-export type ProjectMember = { person: { id: string; ref_code: string; name: string; job_title: string | null }; role: string; is_pm: boolean };
+/** employment_state is absent from an older server; when present, only 'Active' people can take a role such as phase owner. */
+export type ProjectMember = { person: { id: string; ref_code: string; name: string; job_title: string | null; employment_state?: string }; role: string; is_pm: boolean };
+/** True unless the server says the person is no longer employed (an older server says nothing: offer them). */
+export const isActiveMember = (m: ProjectMember) => (m.person.employment_state ?? 'Active') === 'Active';
 const membersPath = (code: string) => `/projects/${encodeURIComponent(code)}/members`;
 export const listProjectMembers = async (code: string): Promise<ProjectMember[]> => (await apiFetch<ListResponse<ProjectMember>>(membersPath(code))).data;
 export const addProjectMember = (code: string, personId: string, role: string) =>

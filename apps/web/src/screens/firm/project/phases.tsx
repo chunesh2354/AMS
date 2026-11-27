@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getPeople, getProject, personName, type Phase } from '../../../api';
 import { failureMessage, isLive } from '../../../api/live';
-import { getProjectTab, isForbidden, nameOf, savePhaseProgress, type ProjectTabView } from '../../../api/live/project-tabs';
+import { getProjectTab, isActiveMember, isForbidden, listProjectMembers, nameOf, updatePhase, type ProjectTabView } from '../../../api/live/project-tabs';
+import type { LivePhase } from '../../../api/live/projects';
 import { useResource } from '../../../api/useResource';
 import { useSession } from '../../../app/session';
 import { todayIn } from '../../../api/live/time';
@@ -24,9 +25,15 @@ import { useToast } from '../../../ui/Toast';
 import { Tooltip } from '../../../ui/Tooltip';
 import { formatDate, formatGrouped, formatINR, formatPercent } from '../../../ui/format';
 import { GoTo } from '../../shared/go-to';
+import { LiveEditPhaseSheet, type TeamOption } from './phase-sheets';
 
 const forecast = (p: Phase) => p.actual + p.etc;
+/** A live phase with no hours budget (the server sends null). Mock phases always have one. */
+const noBudget = (p: Phase) => (p as Partial<LivePhase>).budgetHours === null;
 const noPeople = async (): Promise<Awaited<ReturnType<typeof getPeople>>> => [];
+const noMembers = async () => [];
+/** A missing date reads Not set, never an invalid date. */
+const dateText = (iso: string) => (iso ? formatDate(iso) : 'Not set');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthYear = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
 const longDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
@@ -37,9 +44,9 @@ const longDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(i
 const todayIso = (timeZone?: string) => todayIn(timeZone);
 
 function overrunNote(phases: Phase[], advise = true): string | null {
-  const over = phases.filter((p) => forecast(p) > p.budget).sort((a, b) => (forecast(b) - b.budget) - (forecast(a) - a.budget))[0];
+  const over = phases.filter((p) => !noBudget(p) && forecast(p) > p.budget).sort((a, b) => (forecast(b) - b.budget) - (forecast(a) - a.budget))[0];
   if (!over) return null;
-  const spare = phases.filter((p) => p.id !== over.id && forecast(p) < p.budget).sort((a, b) => (b.budget - forecast(b)) - (a.budget - forecast(a)))[0];
+  const spare = phases.filter((p) => p.id !== over.id && !noBudget(p) && forecast(p) < p.budget).sort((a, b) => (b.budget - forecast(b)) - (a.budget - forecast(a)))[0];
   const head = `${over.name} is forecast at ${formatGrouped(forecast(over))} h against a ${formatGrouped(over.budget)} h budget.`;
   if (!advise) return head;
   return spare
@@ -96,8 +103,8 @@ function BudgetRevisionSheet({ phases, open, onClose, initial }: { phases: Phase
   );
 }
 
-/** progressOnly: live mode, where PUT /phases/:id/progress takes ETC and delivery only. Owner and dates have no endpoint yet. */
-function EditPhaseSheet({ phase, onClose, onSave, people, progressOnly = false, busy = false }: { phase: Phase | null; onClose: () => void; onSave: (p: Phase) => void; people: { id: string; name: string; title: string }[]; progressOnly?: boolean; busy?: boolean }) {
+/** Mock mode's Edit sheet: the change stays in this view. Live mode uses LiveEditPhaseSheet (phase-sheets.tsx). */
+function EditPhaseSheet({ phase, onClose, onSave, people }: { phase: Phase | null; onClose: () => void; onSave: (p: Phase) => void; people: { id: string; name: string; title: string }[] }) {
   const zone = useSession().viewer.firm?.timezone;
   const [draft, setDraft] = useState<Phase | null>(null);
   const [etc, setEtc] = useState('');
@@ -114,22 +121,16 @@ function EditPhaseSheet({ phase, onClose, onSave, people, progressOnly = false, 
   return (
     <Sheet
       open={!!phase} onClose={onClose} title="Edit phase" description={phase?.name}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy} onClick={save}>Save phase</Button></>}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save}>Save phase</Button></>}
     >
       {draft && (
         <Form onSubmit={(e) => { e.preventDefault(); save(); }}>
-          {!progressOnly && (
-            <FormSection>
-              <PersonPicker label="Owner" people={people} value={draft.ownerId} onChange={(v) => v && setDraft({ ...draft, ownerId: v })} />
-            </FormSection>
-          )}
+          <FormSection>
+            <PersonPicker label="Owner" people={people} value={draft.ownerId} onChange={(v) => v && setDraft({ ...draft, ownerId: v })} />
+          </FormSection>
           <FormSection columns={2}>
-            {!progressOnly && (
-              <>
-                <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={isLive ? todayIso(zone) : TODAY} />
-                <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={isLive ? todayIso(zone) : TODAY} />
-              </>
-            )}
+            <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={isLive ? todayIso(zone) : TODAY} />
+            <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={isLive ? todayIso(zone) : TODAY} />
             <NumberField label="ETC (h)" value={etc} onChange={(e) => setEtc(e.target.value)} error={tried && badEtc ? 'Enter hours, zero or more' : undefined} />
             <NumberField label="Delivery (%)" value={delivery} onChange={(e) => setDelivery(e.target.value)} error={tried && badDelivery ? 'Enter 0 to 100' : undefined} />
           </FormSection>
@@ -153,36 +154,62 @@ export function ProjectPhasesScreen() {
   const livePeople = isLive ? (project as ProjectTabView | null)?.people ?? {} : {};
   const ownerName = (ref: string) => (isLive ? nameOf(livePeople, ref) : personName(ref));
   const today = isLive ? todayIso(viewer.firm?.timezone) : TODAY;
-  const [saving, setSaving] = useState(false);
-  const saveLive = async (p: Phase) => {
-    setSaving(true);
+  const live = isLive ? (project as ProjectTabView | null) : null;
+  // The server decides who may change phases; an older server that does not say offers nothing.
+  const canEdit = !isLive || !!live?.live.permissions.edit_phases;
+  const members = useResource(() => (isLive && canEdit ? listProjectMembers(id).catch(() => []) : noMembers()), [id, canEdit]);
+  /**
+   * Owner choices: the PM and the project's members (person uuids, as PUT /phases/:id takes them), only those still
+   * employed, since the server refuses an owner who is not Active. The sheet adds the current owner back if needed.
+   */
+  const team: TeamOption[] = [];
+  const left = new Set((members.data ?? []).filter((m) => !isActiveMember(m)).map((m) => m.person.id));
+  if (live?.live.pm && !left.has(live.live.pm.id)) team.push({ id: live.live.pm.id, name: live.live.pm.name });
+  for (const m of members.data ?? []) if (isActiveMember(m) && !team.some((t) => t.id === m.person.id)) team.push({ id: m.person.id, name: m.person.name });
+  const markComplete = async (p: Phase) => {
     try {
-      await savePhaseProgress(p.id, { etc: p.etc, delivery: p.delivery });
-      setEditing(null);
-      toast({ variant: 'success', message: `${p.name} progress saved.` });
+      await updatePhase(p.id, { status: 'Complete' });
+      toast({ variant: 'success', message: `${p.name} marked complete.` });
       retry();
     } catch (e) {
       toast({ variant: 'danger', message: failureMessage(e) });
-    } finally { setSaving(false); }
+    }
   };
   const [edits, setEdits] = useState<Record<string, Phase>>({});
   const [editing, setEditing] = useState<Phase | null>(null);
   const [revising, setRevising] = useState<{ open: boolean; id: string | null }>({ open: false, id: null });
   const phases = (project?.phases ?? []).map((p) => edits[p.id] ?? p);
-  const overrun = phases.find((p) => forecast(p) > p.budget);
+  const overrun = phases.find((p) => !noBudget(p) && forecast(p) > p.budget);
   const columns: Column<Phase>[] = [
     { key: 'name', header: 'Phase', value: (p) => p.name, render: (p) => <span style={{ whiteSpace: 'nowrap' }}>{p.name}</span> },
     // Status sits next to the name so it stays in view when the hours columns overflow at 1440.
     { key: 'status', header: 'Status', type: 'status', value: (p) => p.status },
-    { key: 'dates', header: 'Dates', value: (p) => p.start, render: (p) => <span className="stacked t-numeric"><span>{formatDate(p.start)}</span><span className="ink-2">{formatDate(p.end)}</span></span> },
-    { key: 'owner', header: 'Owner', value: (p) => ownerName(p.ownerId), render: (p) => <Tooltip text={ownerName(p.ownerId)}><span tabIndex={0} className="tip-target"><Avatar name={ownerName(p.ownerId)} size={28} /></span></Tooltip> },
-    { key: 'budget', header: 'Budget h', type: 'number', value: (p) => p.budget, total: (r) => r.reduce((s, x) => s + x.budget, 0) },
+    {
+      key: 'dates', header: 'Dates', value: (p) => p.start,
+      render: (p) => (p.start || p.end
+        ? <span className="stacked t-numeric"><span>{dateText(p.start)}</span><span className="ink-2">{dateText(p.end)}</span></span>
+        : <span className="ink-2">Not set</span>),
+    },
+    {
+      key: 'owner', header: 'Owner', value: (p) => (p.ownerId ? ownerName(p.ownerId) : 'No owner'),
+      render: (p) => (p.ownerId
+        ? <Tooltip text={ownerName(p.ownerId)}><span tabIndex={0} className="tip-target"><Avatar name={ownerName(p.ownerId)} size={28} /></span></Tooltip>
+        : <span className="ink-2" style={{ whiteSpace: 'nowrap' }}>No owner</span>),
+    },
+    {
+      key: 'budget', header: 'Budget h', type: 'number', value: (p) => p.budget, total: (r) => r.reduce((s, x) => s + x.budget, 0),
+      render: (p) => (noBudget(p) ? <span className="ink-2">Not set</span> : formatGrouped(p.budget)),
+    },
     { key: 'actual', header: 'Actual h', type: 'number', value: (p) => p.actual, total: (r) => r.reduce((s, x) => s + x.actual, 0) },
     { key: 'etc', header: 'ETC h', type: 'number', value: (p) => p.etc, total: (r) => r.reduce((s, x) => s + x.etc, 0) },
     { key: 'forecast', header: 'Forecast h', type: 'number', value: forecast, total: (r) => r.reduce((s, x) => s + forecast(x), 0) },
     {
       key: 'variance', header: 'Over/under h', type: 'number', value: (p) => forecast(p) - p.budget,
-      render: (p) => { const v = forecast(p) - p.budget; return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{signed(v)}</span>; },
+      render: (p) => {
+        if (noBudget(p)) return <span className="ink-2">No budget</span>;
+        const v = forecast(p) - p.budget;
+        return <span className={v > 0 ? 'err-cell' : v < 0 ? 'ink-2' : undefined} title="Forecast minus budget. Positive is over budget.">{signed(v)}</span>;
+      },
     },
     { key: 'delivery', header: 'Delivery', type: 'number', value: (p) => p.delivery, render: (p) => formatPercent(p.delivery) },
     isLive
@@ -215,21 +242,22 @@ export function ProjectPhasesScreen() {
       <DataTable
         label="Phases" columns={columns} rows={phases} rowKey={(p) => p.id} state={tableState} onRetry={retry} capability="view project phases"
         empty={{ message: 'This project has no phases yet.', action: <GoTo to={`/firm/projects/${id}`}>See project overview</GoTo> }}
-        rowActions={(p) => (isLive
-          ? [{ label: 'Edit', onSelect: () => setEditing(p) }]
+        rowActions={!canEdit ? undefined : (p) => (isLive
+          ? [{ label: 'Edit', onSelect: () => setEditing(p) }, ...(p.status !== 'Complete' ? [{ label: 'Mark complete', onSelect: () => { void markComplete(p); } }] : [])]
           : [{ label: 'Edit', onSelect: () => setEditing(p) }, { label: 'Budget revision', onSelect: () => setRevising({ open: true, id: p.id }) }])}
       />
       {note && <p className="t-body-sm ink-2">{note}</p>}
       </section>
       {!isLive && <BudgetRevisionSheet phases={phases} open={revising.open} initial={revising.id} onClose={() => setRevising({ open: false, id: null })} />}
-      <EditPhaseSheet
-        phase={editing} onClose={() => setEditing(null)}
-        people={(people.data ?? []).map((p) => ({ id: p.id, name: p.name, title: p.title }))}
-        progressOnly={isLive} busy={saving}
-        onSave={isLive
-          ? (p) => { void saveLive(p); }
-          : (p) => { setEdits((e) => ({ ...e, [p.id]: p })); setEditing(null); toast({ variant: 'success', message: `${p.name} updated in this view.` }); }}
-      />
+      {isLive
+        ? <LiveEditPhaseSheet phase={editing as LivePhase | null} team={team} today={today} onClose={() => setEditing(null)} onSaved={retry} />
+        : (
+          <EditPhaseSheet
+            phase={editing} onClose={() => setEditing(null)}
+            people={(people.data ?? []).map((p) => ({ id: p.id, name: p.name, title: p.title }))}
+            onSave={(p) => { setEdits((e) => ({ ...e, [p.id]: p })); setEditing(null); toast({ variant: 'success', message: `${p.name} updated in this view.` }); }}
+          />
+        )}
     </div>
   );
 }

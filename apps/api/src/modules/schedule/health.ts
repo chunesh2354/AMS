@@ -21,6 +21,7 @@ import { firmClock, plansFor, type ProjectPlan } from './plan';
  *   hours     forecast (approved actual + ETC) above 100% of the approved hours budget = At risk;
  *             90% to 100% = Watch; no budget but hours forecast = Watch.
  *   schedule  slip (worst phase or project-end slip, see plan.ts) above 7 days = At risk; 1 to 7 days = Watch.
+ *             A project On hold or Delivery complete is never At risk from slip (Watch at most).
  *   tasks     an overdue open task that blocks another open task (finish-to-start) = At risk;
  *             any other overdue open task = Watch.
  *   status    project On hold = Watch.
@@ -40,7 +41,7 @@ export const HEALTH_THRESHOLDS = {
 export const HEALTH_RULE = [
   'Each signal reads On track, Watch or At risk; the project takes the worst. Reasons list every signal that is not On track.',
   'Hours: forecast above 100% of the approved budget is At risk; 90% to 100% is Watch; a forecast with no budget is Watch.',
-  'Schedule: a slip of more than 7 days is At risk; 1 to 7 days is Watch.',
+  'Schedule: a slip of more than 7 days is At risk; 1 to 7 days is Watch. A project on hold or delivery complete is never At risk from slip.',
   'Tasks: an overdue task that blocks another open task is At risk; any other overdue task is Watch.',
   'Status: a project on hold is Watch.',
   'Margin: margin to date below the margin target is Watch (counted for every viewer; figures shown only with margin.view).',
@@ -66,6 +67,10 @@ export function scheduleSignal(slipDays: number | null, driver: string | null): 
   if (d > HEALTH_THRESHOLDS.slip_at_risk_above_days) return { key: 'schedule', status: 'At risk', reason: text };
   if (d >= HEALTH_THRESHOLDS.slip_watch_days) return { key: 'schedule', status: 'Watch', reason: text };
   return { key: 'schedule', status: 'On track', reason: null };
+}
+/** A project On hold or Delivery complete is never At risk from slip: the slip reads Watch at most. */
+export function pausedOrDelivered(status: string, s: Signal): Signal {
+  return (status === 'On hold' || status === 'Delivery complete') && s.status === 'At risk' ? { ...s, status: 'Watch' } : s;
 }
 export function tasksSignal(overdue: number, blocking: { title: string }[]): Signal {
   if (blocking.length) {
@@ -121,7 +126,7 @@ async function healthRow(tx: Parameters<typeof entitlementOf>[0], actor: Actor, 
   const budget = Number(plan.hours.budget); const forecastH = Number(plan.hours.forecast);
   const health = combine([
     hoursSignal(budget, forecastH),
-    scheduleSignal(plan.slip_days, plan.slip_driver?.name ?? null),
+    pausedOrDelivered(p.status, scheduleSignal(plan.slip_days, plan.slip_driver?.name ?? null)),
     tasksSignal(plan.overdue_tasks, plan.blocking_overdue_tasks),
     p.status === 'On hold' ? { key: 'status', status: 'Watch', reason: `On hold${p.hold_reason ? `: ${p.hold_reason}` : ''}` } : { key: 'status', status: 'On track', reason: null },
     marginSignal(marginPct, target, seesMargin),

@@ -145,7 +145,7 @@ export async function overviewFor(tx: Tx, actor: Actor, asOf: string, tz: string
   for (const x of phases) {
     const budget = Number(x.budget_hours); const actual = Number(x.actual_hours); const etc = Number(x.etc_hours);
     const over = actual + etc - budget;
-    if (x.status === 'Complete' || budget <= 0 || over <= 0) continue;
+    if (x.status === 'Complete' || x.status === 'Cancelled' || budget <= 0 || over <= 0) continue;
     const code = codeOf.get(x.project_id)!;
     push({
       id: `phase:${x.id}`, type: 'phase_overrun', title: `${code} ${x.name}`,
@@ -154,7 +154,8 @@ export async function overviewFor(tx: Tx, actor: Actor, asOf: string, tz: string
     });
   }
   const projects = projectRows.map((p) => {
-    const own = phases.filter((x) => x.project_id === p.id);
+    // Cancelled phases are left out of the project's hours and delivery (as schedule/plan.ts and GET /projects/:code).
+    const own = phases.filter((x) => x.project_id === p.id && x.status !== 'Cancelled');
     const weight = own.reduce((s, x) => s + Number(x.fee), 0);
     const delivery = weight ? own.reduce((s, x) => s + Number(x.delivery_progress_pct) * Number(x.fee), 0) / weight : 0;
     const budget = own.reduce((s, x) => s + Number(x.budget_hours), 0);

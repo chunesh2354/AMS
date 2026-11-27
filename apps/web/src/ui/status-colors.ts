@@ -14,7 +14,7 @@ export const STATUS_GROUPS = {
   neutral: ['Draft', 'Planned', 'Not started', 'Not sent', 'Pending start', 'Archived', 'On hold', 'Superseded', 'Cancelled', 'Unsent', 'Not submitted', 'Not payable', 'Not eligible', 'Tentative-plan', 'New', 'Low', 'Not configured', 'CSV', 'None'],
   info: ['Submitted', 'In review', 'Internal review', 'Sent', 'Ready', 'In progress', 'Pending (accounting)', 'Reserved', 'Qualified', 'Proposal', 'Awaiting authorization', 'Identified', 'Estimated', 'Cancellation requested'],
   warn: ['Returned', 'Tentative', 'Pending (approval)', 'Part-paid', 'Uncertain', 'Scope approved', 'Partially approved', 'Expired', 'Suspended', 'Incomplete data', 'Delegated', 'Medium', 'MOCK'],
-  ok: ['Approved', 'Accepted', 'Active', 'Done', 'Finalized', 'Settled', 'Paid', 'Published', 'Won', 'Enabled', 'Recorded', 'Billed', 'Eligible', 'Delivery complete', 'Live'],
+  ok: ['Approved', 'Accepted', 'Active', 'Done', 'Finalized', 'Settled', 'Paid', 'Published', 'Won', 'Enabled', 'Recorded', 'Billed', 'Eligible', 'Delivery complete', 'Complete', 'Live'],
   danger: ['Rejected', 'Blocked', 'Overdue', 'Disputed', 'Failed', 'Revoked', 'Ended', 'Lost', 'Declined', 'Overallocated', 'Overrun', 'Conflict', 'Excess', 'High'],
 } as const;
 
@@ -40,7 +40,7 @@ export const MARKER_BY_STATUS: Record<Status, Marker> = {
   // Done, paid, settled, closed, withdrawn: grey.
   Archived: 'done', Superseded: 'done', Cancelled: 'done', 'Not payable': 'done', 'Not eligible': 'done', None: 'done',
   Done: 'done', Finalized: 'done', Settled: 'done', Paid: 'done', Recorded: 'done', Billed: 'done',
-  'Delivery complete': 'done', Ended: 'done', Lost: 'done',
+  'Delivery complete': 'done', Complete: 'done', Ended: 'done', Lost: 'done',
 };
 
 const TONE_BY_STATUS = new Map<string, Tone>(

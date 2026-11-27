@@ -7,7 +7,7 @@ import { ProjectHealthView } from './project-health';
 import { StudioTimelineView } from './project/timeline-studio';
 import { useResource } from '../../api/useResource';
 import { apiFetch, isLive, type ListResponse } from '../../api/live';
-import { mapProject, type ApiProject, type LiveProjectView } from '../../api/live/projects';
+import { PROJECT_STATUSES, mapProject, type ApiProject, type LiveProjectView } from '../../api/live/projects';
 import { canCreateProjects, useSession } from '../../app/session';
 import { Avatar } from '../../ui/Avatar';
 import { BudgetBar } from '../../ui/BudgetBar';
@@ -21,6 +21,11 @@ import { formatGrouped } from '../../ui/format';
 
 const opts = (v: string[]) => [...new Set(v)].sort().map((x) => ({ value: x, label: x }));
 const slug = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+/** The statuses the projects have, in lifecycle order (Draft to Archived), then any other by name. */
+const statusOpts = (v: string[]) => {
+  const rank = (x: string) => { const i = (PROJECT_STATUSES as readonly string[]).indexOf(x); return i < 0 ? PROJECT_STATUSES.length : i; };
+  return [...new Set(v)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).map((x) => ({ value: x, label: x }));
+};
 type View = 'list' | 'timeline' | 'health';
 const VIEWS: { value: View; label: string }[] = [{ value: 'list', label: 'List' }, { value: 'timeline', label: 'Timeline' }, { value: 'health', label: 'Health' }];
 
@@ -47,7 +52,7 @@ export function ProjectsScreen() {
     { type: 'select', key: 'pm', label: 'PM', options: opts(projects.map((p) => pmNameOf(p))) },
     { type: 'select', key: 'client', label: 'Client', options: opts(projects.map((p) => p.client)) },
     { type: 'select', key: 'stage', label: 'Stage', options: opts(projects.map((p) => p.stage)) },
-    { type: 'select', key: 'status', label: 'Status', options: opts(projects.map((p) => p.status)) },
+    { type: 'select', key: 'status', label: 'Status', options: statusOpts(projects.map((p) => p.status)) },
     { type: 'select', key: 'risk', label: 'Risk', options: projects.map((p) => ({ value: slug(p.risk.label), label: p.risk.label })) },
   ], [projects]);
 

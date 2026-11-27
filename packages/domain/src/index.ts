@@ -106,7 +106,27 @@ export const MACHINES: Record<string, Table> = {
   },
   jobStatus: { Queued: { run: 'Running' }, Running: { succeed: 'Succeeded', fail: 'Failed', timeout: 'Uncertain' }, Failed: { run: 'Running' }, Uncertain: { reconcile: 'Succeeded', reconcile_missing: 'Failed' }, Succeeded: {} },
   settlementState: { Unpaid: { part: 'Part-paid', settle: 'Settled', dispute: 'Disputed' }, 'Part-paid': { part: 'Part-paid', settle: 'Settled', dispute: 'Disputed' }, Disputed: { resolve: 'Unpaid', part: 'Disputed', settle: 'Settled' }, Settled: {} },
+  /**
+   * Project lifecycle. The event is the target status, so a refused move lists the statuses it may go to.
+   * Draft is never a target; Archived is left only by restoring to Active.
+   */
+  projectStatus: {
+    Draft: { Active: 'Active', Archived: 'Archived' },
+    Active: { 'On hold': 'On hold', 'Delivery complete': 'Delivery complete', Archived: 'Archived' },
+    'On hold': { Active: 'Active', 'Delivery complete': 'Delivery complete', Archived: 'Archived' },
+    'Delivery complete': { Active: 'Active', Archived: 'Archived' },
+    Archived: { Active: 'Active' },
+  },
+  /** Phase status: any of the four to any other (never to itself). The event is the target status. */
+  phaseStatus: {
+    'Not started': { 'In progress': 'In progress', Complete: 'Complete', Cancelled: 'Cancelled' },
+    'In progress': { 'Not started': 'Not started', Complete: 'Complete', Cancelled: 'Cancelled' },
+    Complete: { 'Not started': 'Not started', 'In progress': 'In progress', Cancelled: 'Cancelled' },
+    Cancelled: { 'Not started': 'Not started', 'In progress': 'In progress', Complete: 'Complete' },
+  },
 };
+export const PROJECT_STATUSES = ['Draft', 'Active', 'On hold', 'Delivery complete', 'Archived'] as const;
+export const PHASE_STATUSES = ['Not started', 'In progress', 'Complete', 'Cancelled'] as const;
 export function transition(machine: keyof typeof MACHINES & string, from: string, action: string): string {
   const row = MACHINES[machine][from] ?? {};
   const to = row[action];

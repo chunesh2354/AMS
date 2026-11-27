@@ -4,6 +4,10 @@ import { MARKER_BY_STATUS, STATUS_GROUPS, markerOf, toneOf, type Status, type To
 describe('status-colors', () => {
   it('treats On hold as neutral, a chosen state', () => expect(toneOf('On hold')).toBe('neutral'));
   it('treats Delivery complete as ok', () => expect(toneOf('Delivery complete')).toBe('ok'));
+  it('shows a Complete phase as finished: ok tone, done marker', () => {
+    expect(toneOf('Complete')).toBe('ok');
+    expect(markerOf('Complete')).toBe('done');
+  });
   it('splits the two Pending meanings', () => {
     expect(toneOf('Pending (approval)')).toBe('warn');
     expect(toneOf('Pending (accounting)')).toBe('info');

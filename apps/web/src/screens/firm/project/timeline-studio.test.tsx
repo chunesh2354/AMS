@@ -110,4 +110,15 @@ describe('studio timeline in live mode', () => {
     expect(await screen.findByRole('link', { name: 'PRJ-03 Hillside Library' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('link', { name: 'PRJ-02 Riverside Offices' })).toBeNull());
   });
+
+  it('filters to Delivery complete projects through GET /schedule', async () => {
+    const user = userEvent.setup();
+    open('/firm/projects?view=timeline');
+    await screen.findByRole('table', { name: 'All projects on a timeline' });
+    const group = screen.getByRole('group', { name: 'Filter by status' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['All', 'Active', 'On hold', 'Delivery complete']);
+    await user.click(within(group).getByRole('button', { name: 'Delivery complete' }));
+    await waitFor(() => expect(urls.at(-1)).toMatch(/\/schedule\?status=Delivery\+complete$/));
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'PRJ-01 Lakeview Residence' })).toBeNull());
+  });
 });
