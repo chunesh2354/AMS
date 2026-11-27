@@ -5,6 +5,7 @@ import { isLive } from '../../../api/live';
 import { getProjectTab, isForbidden, nameOf, type ProjectTabView } from '../../../api/live/project-tabs';
 import { useResource } from '../../../api/useResource';
 import { useSession } from '../../../app/session';
+import { todayIn } from '../../../api/live/time';
 import { WorkspaceColumns } from '../../../layouts/WorkspaceColumns';
 import { AttentionList } from '../../../ui/AttentionList';
 import { BudgetBar } from '../../../ui/BudgetBar';
@@ -80,7 +81,8 @@ function MockProjectOverview() {
   );
 }
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/** The studio's date, not the browser's UTC date (they differ from 00:00 to 05:30 in India). */
+const todayIso = (timeZone?: string) => todayIn(timeZone);
 
 /**
  * Live mode: GET /projects/:code. Tasks, conflicts and the attention list have no endpoint yet,
@@ -88,6 +90,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
  */
 function LiveProjectOverview() {
   const { id = '' } = useParams();
+  const zone = useSession().viewer.firm?.timezone;
   const [denied, setDenied] = useState(false);
   const { state, data: p, retry } = useResource<ProjectTabView | null>(
     () => getProjectTab(id).catch((e: unknown) => { if (isForbidden(e)) setDenied(true); throw e; }),
@@ -141,7 +144,7 @@ function LiveProjectOverview() {
           </section>
         </div>
       </div>
-      {dated.length > 0 && <GanttStrip today={todayIso()} phases={dated} />}
+      {dated.length > 0 && <GanttStrip today={todayIso(zone)} phases={dated} />}
       <DataTable label="Phases" columns={columns} rows={p.phases} rowKey={(x) => x.id} density="dense" columnPicker />
     </>
   );

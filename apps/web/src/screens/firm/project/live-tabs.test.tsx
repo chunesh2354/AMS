@@ -116,6 +116,17 @@ describe('project phases in live mode', () => {
     expect(screen.queryByRole('button', { name: 'Budget revision' })).toBeNull();
   });
 
+  it('says today in the studio, not the browser UTC date', async () => {
+    // 00:54 on 27 Nov in Mumbai is still 26 Nov in UTC.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-26T19:24:00Z'));
+    try {
+      handler = (url) => (url.endsWith('/me') ? { status: 200, body: me } : url.endsWith('/projects/LV-77') ? { status: 200, body: PROJECT } : undefined);
+      open('/firm/projects/LV-77/phases');
+      expect(await screen.findByText(/today is 27 November 2026/)).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('saves ETC and delivery with PUT /phases/:id/progress, then reloads', async () => {
     let put: { url: string; body: unknown } | null = null;
     handler = (url, init) => {

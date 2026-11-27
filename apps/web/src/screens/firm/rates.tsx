@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiFailure, failureMessage, isLive, isRestricted, rupees } from '../../api/live';
 import { createRate, listRates, type RateCardRow } from '../../api/live/setup';
 import { can, useSession } from '../../app/session';
+import { todayIn } from '../../api/live/time';
 import { PEOPLE } from '../../mock/studio-meridian';
 import { Button } from '../../ui/Button';
 import { DataTable, RESTRICTED, type Column, type DataTableState } from '../../ui/DataTable';
@@ -33,12 +34,14 @@ const mockRows = (): RateCardRow[] => PEOPLE.map((p) => {
   };
 });
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** The studio's date: a new rate applies from today in the studio, not the browser's UTC date. */
+const today = (timeZone?: string) => todayIn(timeZone);
 type Draft = { person: string | null; type: 'bill' | 'cost'; amount: number | null; from: string; reason: string };
 
 function AddRateSheet({ open, onClose, rows, costAllowed, onSaved }: { open: boolean; onClose: () => void; rows: RateCardRow[]; costAllowed: boolean; onSaved: () => void }) {
+  const zone = useSession().viewer.firm?.timezone;
   const toast = useToast();
-  const blank = (): Draft => ({ person: null, type: 'bill', amount: null, from: today(), reason: '' });
+  const blank = (): Draft => ({ person: null, type: 'bill', amount: null, from: today(zone), reason: '' });
   const [form, setForm] = useState<Draft>(blank);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
