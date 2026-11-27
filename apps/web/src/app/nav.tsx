@@ -11,8 +11,12 @@ const i = { size: 20, strokeWidth: 1.5, 'aria-hidden': true } as const;
 /** The mock's Approvals count. Live mode passes the real count (or nothing) to firmNav instead. */
 export const MOCK_APPROVALS_BADGE = 14;
 
-/** The firm navigation. `approvalsBadge` is the pending count; leave it out to show no badge. */
-export const firmNav = (approvalsBadge?: number): NavSection[] => [
+/**
+ * The firm navigation. `approvalsBadge` is the pending count; leave it out to show no badge.
+ * Live mode passes `settings: false` for someone who cannot open any settings section, and links Settings to
+ * /firm/settings, which opens the first section that works for them instead of a "Not available yet" page.
+ */
+export const firmNav = (approvalsBadge?: number, opts: { settings?: boolean; settingsTo?: string } = {}): NavSection[] => [
   { label: 'Work', items: [
     { to: '/firm/overview', label: 'Overview', icon: <LayoutDashboard {...i} /> },
     { to: '/firm/projects', label: 'Projects', icon: <FolderKanban {...i} /> },
@@ -29,7 +33,7 @@ export const firmNav = (approvalsBadge?: number): NavSection[] => [
     { to: '/firm/receivables', label: 'Receivables', icon: <IndianRupee {...i} /> },
   ] },
   { label: 'Insights', items: [{ to: '/firm/reports/utilization', label: 'Reports', icon: <ChartColumn {...i} /> }] },
-  { label: 'Settings', items: [{ to: '/firm/settings/profile', label: 'Settings', icon: <SlidersHorizontal {...i} /> }] },
+  ...(opts.settings === false ? [] : [{ label: 'Settings', items: [{ to: opts.settingsTo ?? '/firm/settings/profile', label: 'Settings', icon: <SlidersHorizontal {...i} /> }] }]),
 ];
 
 /** The mock build's navigation, with the sample Approvals count. */

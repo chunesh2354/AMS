@@ -1,5 +1,6 @@
 import { Navigate, Outlet, createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { useSession, canUseFirm } from './app/session';
+import { isLive } from './api/live';
 import { ShellLayout } from './layouts/ShellLayout';
 import { PermissionDenied } from './ui/PermissionDenied';
 import { PageHeader } from './ui/PageHeader';
@@ -99,7 +100,8 @@ export const routes: RouteObject[] = [
         { path: 'receivables', element: <ReceivablesScreen /> },
         { path: 'reports', element: <Navigate to="utilization" replace /> },
         { path: 'reports/:key', element: <ReportsScreen /> },
-        { path: 'settings', element: <Navigate to="profile" replace /> },
+        // Live: Profile is not available yet, so Settings opens Accounts (finance, who only has Rates, is sent on to Rates).
+        { path: 'settings', element: <Navigate to={isLive ? 'accounts' : 'profile'} replace /> },
         { path: 'settings/*', element: <SettingsScreen /> },
       ],
     }],

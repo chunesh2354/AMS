@@ -13,7 +13,7 @@ import { formatDate, toISO } from '../ui/format';
 import { useMediaQuery } from '../ui/useMediaQuery';
 import type { MenuItem } from '../ui/Menu';
 import { FIRM_NAV, TEAM_NAV, firmNav, firmTabs, teamTabs } from '../app/nav';
-import { VIEWERS, canUseFirm, useSession, useTimer, type Viewer } from '../app/session';
+import { VIEWERS, canCreateProjects, canOpenSettings, canUseFirm, canUseSettings, useSession, useTimer, type Viewer } from '../app/session';
 import { OverlaysProvider, useOverlays } from '../app/overlays';
 import { getNotifications } from '../api';
 import { apiFetch, failureMessage, isLive, signOut, type ListResponse } from '../api/live';
@@ -101,7 +101,10 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
     pendingApprovalCount().then((n) => { if (current) setPendingApprovals(n); }, () => { if (current) setPendingApprovals(null); });
     return () => { current = false; };
   }, [viewer, pathname]);
-  const firmSections = useMemo(() => (isLive ? firmNav(approvalsBadge(pendingApprovals)) : FIRM_NAV), [pendingApprovals]);
+  const firmSections = useMemo(
+    () => (isLive ? firmNav(approvalsBadge(pendingApprovals), { settings: canOpenSettings(viewer), settingsTo: '/firm/settings' }) : FIRM_NAV),
+    [pendingApprovals, viewer],
+  );
 
   const markAllRead = async () => {
     if (isLive) {
@@ -138,8 +141,10 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
       { id: 'leave', label: 'Request leave', group: 'Actions', onSelect: openLeave },
       ...navItems.map((n) => ({ id: n.to, label: n.label, group: 'Navigate', meta: n.badge ? `${n.badge} pending` : undefined, onSelect: go(n.to) })),
       ...(firmAllowed ? [
-        { id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/people?add=1') },
-        { id: 'new-project', label: 'Create project', group: 'Create', onSelect: go('/firm/projects?new=1') },
+        // Live: people are added in Settings, Accounts (People ignores ?add=1 there), by those who may manage accounts.
+        ...(!isLive ? [{ id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/people?add=1') }]
+          : canUseSettings(viewer) ? [{ id: 'new-person', label: 'Add person', group: 'Create', onSelect: go('/firm/settings/accounts') }] : []),
+        ...(canCreateProjects(viewer) ? [{ id: 'new-project', label: 'Create project', group: 'Create', onSelect: go('/firm/projects?new=1') }] : []),
       ] : []),
       // Sample people and projects: mock only, so live mode never offers a jump to a record that is not in this firm.
       ...(firmAllowed && !isLive ? [
@@ -151,7 +156,7 @@ function Shell({ iface }: { iface: 'firm' | 'team' }) {
       ] : []),
       ...(isLive && records ? [...records.people, ...records.projects] : []),
     ];
-  }, [navigate, firmAllowed, firmSections, openLogTime, openLeave, records]);
+  }, [navigate, firmAllowed, firmSections, openLogTime, openLeave, records, viewer]);
 
   // Light only for now: the theme choice is gone from the account menu (session.tsx forces light).
   const menuItems: MenuItem[] = [
