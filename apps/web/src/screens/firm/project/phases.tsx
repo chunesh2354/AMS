@@ -5,6 +5,7 @@ import { failureMessage, isLive } from '../../../api/live';
 import { getProjectTab, isForbidden, nameOf, savePhaseProgress, type ProjectTabView } from '../../../api/live/project-tabs';
 import { useResource } from '../../../api/useResource';
 import { useSession } from '../../../app/session';
+import { todayIn } from '../../../api/live/time';
 import { TODAY } from '../../../mock/studio-meridian';
 import { Avatar } from '../../../ui/Avatar';
 import { BudgetBar } from '../../../ui/BudgetBar';
@@ -32,7 +33,8 @@ const longDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(i
 
 /** One plain sentence about the worst overrun and where hours could come from. Live mode has no budget revision yet, so it states the overrun only. */
 /** Live mode: the real date, never the sample studio's TODAY. */
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/** The studio's date, not the browser's UTC date (they differ from 00:00 to 05:30 in India). */
+const todayIso = (timeZone?: string) => todayIn(timeZone);
 
 function overrunNote(phases: Phase[], advise = true): string | null {
   const over = phases.filter((p) => forecast(p) > p.budget).sort((a, b) => (forecast(b) - b.budget) - (forecast(a) - a.budget))[0];
@@ -96,6 +98,7 @@ function BudgetRevisionSheet({ phases, open, onClose, initial }: { phases: Phase
 
 /** progressOnly: live mode, where PUT /phases/:id/progress takes ETC and delivery only. Owner and dates have no endpoint yet. */
 function EditPhaseSheet({ phase, onClose, onSave, people, progressOnly = false, busy = false }: { phase: Phase | null; onClose: () => void; onSave: (p: Phase) => void; people: { id: string; name: string; title: string }[]; progressOnly?: boolean; busy?: boolean }) {
+  const zone = useSession().viewer.firm?.timezone;
   const [draft, setDraft] = useState<Phase | null>(null);
   const [etc, setEtc] = useState('');
   const [delivery, setDelivery] = useState('');
@@ -123,8 +126,8 @@ function EditPhaseSheet({ phase, onClose, onSave, people, progressOnly = false, 
           <FormSection columns={2}>
             {!progressOnly && (
               <>
-                <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={isLive ? todayIso() : TODAY} />
-                <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={isLive ? todayIso() : TODAY} />
+                <DateField label="Start" value={draft.start} onChange={(v) => v && setDraft({ ...draft, start: v })} today={isLive ? todayIso(zone) : TODAY} />
+                <DateField label="End" value={draft.end} onChange={(v) => v && setDraft({ ...draft, end: v })} today={isLive ? todayIso(zone) : TODAY} />
               </>
             )}
             <NumberField label="ETC (h)" value={etc} onChange={(e) => setEtc(e.target.value)} error={tried && badEtc ? 'Enter hours, zero or more' : undefined} />
@@ -149,7 +152,7 @@ export function ProjectPhasesScreen() {
   const people = useResource(isLive ? noPeople : getPeople, []);
   const livePeople = isLive ? (project as ProjectTabView | null)?.people ?? {} : {};
   const ownerName = (ref: string) => (isLive ? nameOf(livePeople, ref) : personName(ref));
-  const today = isLive ? todayIso() : TODAY;
+  const today = isLive ? todayIso(viewer.firm?.timezone) : TODAY;
   const [saving, setSaving] = useState(false);
   const saveLive = async (p: Phase) => {
     setSaving(true);

@@ -48,6 +48,9 @@ export const canSeeRates = (v: Viewer) => can(v, 'rates.bill.manage', { firmWide
 /** Who may open Settings at all: the settings roles, plus anyone who may see Rates (they get that section only). */
 export const canOpenSettings = (v: Viewer) => canUseSettings(v) || canSeeRates(v);
 
+/** Create project needs projects.create (principal by default; a PM or operations only when granted). Mock mode keeps the button. */
+export const canCreateProjects = (v: Viewer) => !isLive || can(v, 'projects.create');
+
 /** can() bound to the current viewer. */
 export function useCan() {
   const { viewer } = useSession();

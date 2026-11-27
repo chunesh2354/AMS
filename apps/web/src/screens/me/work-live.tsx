@@ -70,7 +70,7 @@ export function MyTasksPanel() {
   useEffect(() => { setMine(data); }, [data]);
 
   const tasks = mine?.tasks ?? [];
-  const apply = (t: LiveTask) => setMine((m) => (m ? { ...m, tasks: t.status === 'Done' || t.assignee?.id !== viewer.id ? m.tasks.filter((x) => x.id !== t.id) : m.tasks.map((x) => (x.id === t.id ? t : x)) } : m));
+  const apply = (t: LiveTask) => setMine((m) => (m ? { ...m, tasks: t.status === 'Done' || t.assignee?.id !== viewer.personId ? m.tasks.filter((x) => x.id !== t.id) : m.tasks.map((x) => (x.id === t.id ? t : x)) } : m));
   const move = async (t: LiveTask, to: TaskStatus) => {
     if (to === t.status) return;
     try {

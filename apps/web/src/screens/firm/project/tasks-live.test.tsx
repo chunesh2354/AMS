@@ -144,4 +144,22 @@ describe('My work in live mode', () => {
     expect(within(screen.getByRole('region', { name: 'No due date, 1' })).getByText('Model photos')).toBeInTheDocument();
     expect(screen.getByText('2 open · 1 overdue')).toBeInTheDocument();
   });
+
+  it('keeps my task in the list after I move it to In progress', async () => {
+    // The assignee is matched by person id (a UUID), not by the viewer's reference code.
+    const user = userEvent.setup();
+    me = ME({ 'projects.plan': 'own' }, 'u-ines', 'Ines Kuruvilla');
+    handler = (url, init) => {
+      if (url.endsWith('/me/tasks')) return list([TASK({ status: 'Blocked', can_edit: false })], { today: '2026-11-10', overdue: 0, due_soon: 0 });
+      if (url.endsWith('/me/work')) return { status: 200, body: { today: '2026-11-10', timezone: 'Asia/Kolkata', month: '2026-11', hours: '0.00', projects: [] } };
+      return api(url, init, { canPlan: false, tasks: [] });
+    };
+    open('/me/work');
+    await user.click(await screen.findByRole('combobox', { name: 'Status of Sun path study' }));
+    await user.click(await screen.findByRole('option', { name: 'In progress' }));
+    await waitFor(() => expect(put).toEqual({ url: '/api/v1/tasks/t1', body: { status: 'In progress' } }));
+    expect(await screen.findByText('Sun path study moved to In progress.')).toBeInTheDocument();
+    expect(screen.getByText('Sun path study')).toBeInTheDocument();
+    expect(screen.getByText('1 open')).toBeInTheDocument();
+  });
 });

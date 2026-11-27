@@ -88,6 +88,20 @@ describe('Rates settings, live mode', () => {
     expect(fetchMock.mock.calls.filter(([u, i]) => String(u).endsWith('/rates') && ((i as RequestInit | undefined)?.method ?? 'GET') === 'GET').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('starts a new version on the studio date, not the browser UTC date', async () => {
+    // 00:54 on 27 Nov in Mumbai is still 26 Nov in UTC.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-26T19:24:00Z'));
+    try {
+      handler = (url) => (url.endsWith('/me') ? me({ 'rates.bill.manage': 'firm' }) : url.includes('/rates') ? list(FENCED) : undefined);
+      openRates();
+      await screen.findByText('Vikram Nair');
+      await userEvent.click(screen.getByRole('button', { name: 'Add rate version' }));
+      const sheet = await screen.findByRole('dialog', { name: 'Add rate version' });
+      expect(within(sheet).getByText('27 Nov 2026')).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('shows a server refusal in the sheet', async () => {
     handler = (url, init) => {
       if (url.endsWith('/me')) return me({ 'rates.bill.manage': 'firm' });

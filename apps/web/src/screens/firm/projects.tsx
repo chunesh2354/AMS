@@ -8,7 +8,7 @@ import { StudioTimelineView } from './project/timeline-studio';
 import { useResource } from '../../api/useResource';
 import { apiFetch, isLive, type ListResponse } from '../../api/live';
 import { mapProject, type ApiProject, type LiveProjectView } from '../../api/live/projects';
-import { useSession } from '../../app/session';
+import { canCreateProjects, useSession } from '../../app/session';
 import { Avatar } from '../../ui/Avatar';
 import { BudgetBar } from '../../ui/BudgetBar';
 import { Button } from '../../ui/Button';
@@ -36,7 +36,9 @@ export function ProjectsScreen() {
   const [params, setParams] = useSearchParams();
   const view: View = params.get('view') === 'timeline' || params.get('view') === 'health' ? (params.get('view') as View) : 'list';
   const setView = (v: View) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'list') n.delete('view'); else n.set('view', v); return n; });
-  const [creating, setCreating] = useState(params.get('new') === '1');
+  // Only someone the server lets create projects sees the button: anyone else got a sheet that could never load.
+  const mayCreate = canCreateProjects(viewer);
+  const [creating, setCreating] = useState(mayCreate && params.get('new') === '1');
   const people = useResource(getPeople, []);
   const { state, data, retry } = useResource<ProjectRow[]>(() => (isLive ? getLiveProjectRows() : getProjects(viewer)), [viewer.id]);
   const projects = useMemo(() => data ?? [], [data]);
@@ -76,7 +78,7 @@ export function ProjectsScreen() {
       <PageHeader
         title="Projects"
         meta={state !== 'loading' && <span className="t-numeric ink-2">{projects.length} projects</span>}
-        primaryAction={<Button variant="primary" onClick={() => setCreating(true)}>Create project</Button>}
+        primaryAction={mayCreate ? <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> : undefined}
       />
       <div><Segmented label="View" options={VIEWS} value={view} onChange={setView} /></div>
       {view === 'list' && (
@@ -85,7 +87,7 @@ export function ProjectsScreen() {
           <DataTable
             label="Projects" columns={columns} rows={state === 'empty' ? [] : rows} rowKey={(p) => p.code} state={state === 'ready' && !rows.length ? 'empty' : state}
             onRetry={retry} capability="view projects" columnPicker onRowClick={(p) => navigate(`/firm/projects/${p.code}`)}
-            empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> }}
+            empty={{ icon: <FolderKanban size={20} strokeWidth={1.5} aria-hidden />, message: 'No project matches these filters.', action: mayCreate ? <Button variant="primary" onClick={() => setCreating(true)}>Create project</Button> : undefined }}
           />
         </>
       )}

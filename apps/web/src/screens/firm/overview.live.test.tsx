@@ -50,9 +50,9 @@ const OVERVIEW: ApiOverview = {
   ],
 };
 
-const open = (body: unknown = OVERVIEW, status = 200) => {
+const open = (body: unknown = OVERVIEW, status = 200, me: unknown = ME) => {
   handler = (url) => {
-    if (url.endsWith('/api/v1/me')) return { status: 200, body: ME };
+    if (url.endsWith('/api/v1/me')) return { status: 200, body: me };
     if (url.endsWith('/api/v1/overview')) return { status, body };
     return undefined;
   };
@@ -116,6 +116,29 @@ describe('Studio overview in live mode', () => {
     const figures = await screen.findByRole('region', { name: 'Key figures' });
     expect(await within(figures).findAllByRole('img', { name: /restricted/ })).toHaveLength(2);
     expect(within(figures).queryByText(/₹/)).toBeNull();
+  });
+
+  it('greets by the studio clock, not a fixed "Good afternoon"', async () => {
+    // 00:54 in Mumbai (19:24 UTC the day before): late night counts as morning.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-26T19:24:00Z'));
+    try {
+      open();
+      expect(await screen.findByRole('heading', { level: 1, name: 'Good morning, Mira' })).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('offers Prepare invoices only to someone who may open Billing', async () => {
+    open();
+    await screen.findByText('₹4,86,000');
+    expect(screen.getAllByRole('link', { name: 'Prepare invoices' })).toHaveLength(2);
+  });
+
+  it('hides Prepare invoices from a project manager without billing.prepare', async () => {
+    open(OVERVIEW, 200, { ...ME, permission_sets: ['pm'], capabilities: { 'budgets.hours.view': 'scoped' } });
+    await screen.findByText('INV-HW-0042 unpaid');
+    expect(screen.queryByRole('link', { name: 'Prepare invoices' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Review approvals' })).toBeInTheDocument();
   });
 
   it('shows the permission state when the server refuses', async () => {
