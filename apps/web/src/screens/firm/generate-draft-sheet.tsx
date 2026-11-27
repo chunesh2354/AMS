@@ -88,9 +88,10 @@ export function LiveGenerateDraftSheet({ open, onClose, items, onCreated }: { op
   const [error, setError] = useState<string | null>(null);
   const [key, setKey] = useState('');
   const [wasOpen, setWasOpen] = useState(false);
-  if (open && !wasOpen) { setWasOpen(true); setProject(null); setTried(false); setError(null); setKey(crypto.randomUUID()); }
-  if (!open && wasOpen) setWasOpen(false);
   const projects = [...new Map(items.map((i) => [i.project, `${i.project} ${i.projectName}`])).entries()].map(([value, label]) => ({ value, label }));
+  // Opened from a project's Billing tab (or with one project ready) there is nothing to choose: preselect it.
+  if (open && !wasOpen) { setWasOpen(true); setProject(projects.length === 1 ? projects[0].value : null); setTried(false); setError(null); setKey(crypto.randomUUID()); }
+  if (!open && wasOpen) setWasOpen(false);
   const submit = async () => {
     if (!project) { setTried(true); return; }
     setBusy(true); setError(null);
