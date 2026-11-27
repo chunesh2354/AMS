@@ -4,7 +4,8 @@ import { getOverview, getProjects, hasFinanceAccess, type AttentionItem, type Pr
 import { ApiFailure, isLive } from '../../api/live';
 import { getLiveOverview, type LiveOverview, type LiveOverviewProject } from '../../api/live/overview';
 import { useResource } from '../../api/useResource';
-import { useSession } from '../../app/session';
+import { can, useSession } from '../../app/session';
+import { greetingFor } from '../../api/live/me';
 import { sortAttention } from '../../ui/AttentionList';
 import { KpiTile } from '../../ui/KpiTile';
 import { ListStateBlock, type ListState } from '../../ui/ListState';
@@ -215,7 +216,7 @@ function LiveProjectRows({ projects }: { projects: LiveOverviewProject[] }) {
   );
 }
 
-function LiveFigures({ data }: { data: LiveOverview }) {
+function LiveFigures({ data, mayBill }: { data: LiveOverview; mayBill: boolean }) {
   const { readyToBill: ready, overdue, utilization: u, approvalsWaiting: w } = data;
   const hoursText = `${formatGrouped(u.billableHours)} h of ${formatGrouped(u.availableHours)} h available`;
   return (
@@ -228,7 +229,7 @@ function LiveFigures({ data }: { data: LiveOverview }) {
         missing={ready.restricted ? [] : ready.value.missing}
         delta={{ text: 'Approved time and fee stages not yet invoiced.' }}
       >
-        <Link to="/firm/billing" className="ov-link">Prepare invoices</Link>
+        {mayBill && <Link to="/firm/billing" className="ov-link">Prepare invoices</Link>}
       </KpiTile>
       <div className="ov-figure--overdue">
         <KpiTile
@@ -269,19 +270,21 @@ function LiveOverviewScreen() {
   const first = viewer.name.split(' ')[0];
   const listState: ListState = denied ? 'denied' : state === 'ready' && !data ? 'loading' : state;
   const shown = listState === 'ready' && data ? data : null;
+  // Billing (GET /billing/*) needs billing.prepare firm-wide; anyone else would land on a permission page.
+  const mayBill = can(viewer, 'billing.prepare', { firmWide: true });
   return (
     <div className="scr-overview">
       <PageHeader
         display
-        title={`Good afternoon, ${first}`}
+        title={`${greetingFor(viewer.firm?.timezone ?? 'Asia/Kolkata')}, ${first}`}
         meta={<span className="t-body ink-2">{shown ? needs(shown.attention.length) : 'This week in the studio.'}</span>}
         secondaryActions={<Link to="/firm/approvals" className="btn btn--secondary">Review approvals</Link>}
-        primaryAction={<Link to="/firm/billing" className="btn btn--primary">Prepare invoices</Link>}
+        primaryAction={mayBill ? <Link to="/firm/billing" className="btn btn--primary">Prepare invoices</Link> : undefined}
       />
 
       {listState !== 'denied' && listState !== 'error' && (
         <section className="ov-figures" aria-label="Key figures">
-          {shown ? <LiveFigures data={shown} /> : Array.from({ length: 4 }, (_, i) => <Skeleton key={i} kind="card" />)}
+          {shown ? <LiveFigures data={shown} mayBill={mayBill} /> : Array.from({ length: 4 }, (_, i) => <Skeleton key={i} kind="card" />)}
         </section>
       )}
 
