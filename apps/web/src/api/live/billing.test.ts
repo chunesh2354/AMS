@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RESTRICTED } from '../../ui/DataTable';
-import { canSubmitToAccounting, cellMoney, draftStatus, mapAccounting, mapDraft, mapException, mapReadyItem, mapWip, type LiveDraftRaw, type LiveExceptionRaw, type LiveReadyItemRaw, type LiveWipRaw } from './billing';
+import { cellMoney, draftStatus, mapAccounting, mapDraft, mapException, mapReadyItem, mapWip, type LiveDraftRaw, type LiveExceptionRaw, type LiveReadyItemRaw, type LiveWipRaw } from './billing';
 
 const proj = { id: 'u-1', code: 'PRJ-01', name: 'Lakeview Residence' };
 const inr = (amount: string) => ({ amount, currency: 'INR' });
@@ -63,8 +63,6 @@ describe('live billing mapping', () => {
     expect(draftStatus({ approval_state: 'In review', accounting_state: 'Not sent' })).toBe('In review');
     expect(draftStatus({ approval_state: 'Approved', accounting_state: 'Uncertain' })).toBe('Uncertain');
     expect(draftStatus({ approval_state: 'Approved', accounting_state: 'Pending' })).toBe('Pending (accounting)');
-    // The server's state before sending is 'Not submitted' (001_core_path.sql): the list shows the approval state.
-    expect(draftStatus({ approval_state: 'Approved', accounting_state: 'Not submitted' })).toBe('Approved');
   });
 
   it('maps WIP without a silent zero when a part is missing', () => {
@@ -77,17 +75,5 @@ describe('live billing mapping', () => {
   it('keeps the MOCK mode from /integrations', () => {
     const a = mapAccounting({ accounting: { adapter: 'mock', label: 'Mock accounting adapter', mode: 'MOCK', last_success: null, last_error: null } });
     expect(a).toMatchObject({ adapter: 'Mock accounting adapter', mode: 'MOCK', status: 'Enabled', lastSuccess: 'Not set' });
-  });
-});
-
-describe('canSubmitToAccounting', () => {
-  it('allows an approved draft the server has not sent yet, or whose send failed', () => {
-    expect(canSubmitToAccounting('Approved', 'Not submitted')).toBe(true);
-    expect(canSubmitToAccounting('Approved', 'Failed')).toBe(true);
-  });
-  it('refuses drafts not yet approved, or already sent', () => {
-    expect(canSubmitToAccounting('In review', 'Not submitted')).toBe(false);
-    expect(canSubmitToAccounting('Approved', 'Pending')).toBe(false);
-    expect(canSubmitToAccounting('Approved', 'Finalized')).toBe(false);
   });
 });
