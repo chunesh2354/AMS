@@ -37,16 +37,16 @@ const mockRows = (): RateCardRow[] => PEOPLE.map((p) => {
 /** The studio's date: a new rate applies from today in the studio, not the browser's UTC date. */
 const today = (timeZone?: string) => todayIn(timeZone);
 type Draft = { person: string | null; type: 'bill' | 'cost'; amount: number | null; from: string; reason: string };
+const blankDraft = (timeZone?: string): Draft => ({ person: null, type: 'bill', amount: null, from: today(timeZone), reason: '' });
 
 function AddRateSheet({ open, onClose, rows, costAllowed, onSaved }: { open: boolean; onClose: () => void; rows: RateCardRow[]; costAllowed: boolean; onSaved: () => void }) {
   const zone = useSession().viewer.firm?.timezone;
   const toast = useToast();
-  const blank = (): Draft => ({ person: null, type: 'bill', amount: null, from: today(zone), reason: '' });
-  const [form, setForm] = useState<Draft>(blank);
+  const [form, setForm] = useState<Draft>(() => blankDraft(zone));
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  useEffect(() => { if (open) { setForm(blank()); setTried(false); setServerError(null); } }, [open]);
+  useEffect(() => { if (open) { setForm(blankDraft(zone)); setTried(false); setServerError(null); } }, [open, zone]);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const errors = {
